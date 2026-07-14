@@ -116,44 +116,48 @@ class GachaScanner:
 
         # 2. 开始逐页扫描
         page = 1
-        max_pages = 500  # 安全上限
-        consecutive_empty = 0  # 连续空页计数
+        max_pages = 500
+
+        import gc
 
         while self._is_running and page <= max_pages:
+            logger.info(">>> 开始第 {} 页 <<<", page)
             self._notify_progress(page, 0, f"正在扫描第 {page} 页...")
 
-            # 截图
-            img = self._screenshot.capture_as_array()
-            if img is None:
+            # 一次截图
+            result = self._screenshot.capture_and_save()
+            if result is None:
                 logger.error("第 {} 页截图失败", page)
                 break
+            img, fname = result
+            logger.info("截图已保存: {}", Path(fname).name)
 
-            # 保存截图（调试用）
-            self._screenshot.capture_and_save()
-
-            # OCR识别当前页
+            # OCR
             page_records = self._scan_page(img)
+            logger.info("第 {} 页 OCR 完成: {} 条", page, len(page_records))
 
             if page_records:
-                consecutive_empty = 0
                 logger.info("第 {} 页: 识别到 {} 条记录", page, len(page_records))
-
                 for record in page_records:
                     record.banner_name = self._current_banner_name
                     record.banner_type = self._current_banner_type
                     self._records.append(record)
-
-                    # 存入数据库
                     if db.add_record(record):
-                        logger.debug("新增记录: {} ({}★)", record.character_name, record.rarity.value)
+                        logger.debug("新增: {}", record.character_name)
                     if self._on_record_found:
                         self._on_record_found(record)
             else:
-                consecutive_empty += 1
-                logger.info("第 {} 页: 无新记录", page)
-                if consecutive_empty >= 3:
-                    logger.info("连续 {} 页无记录，扫描结束", consecutive_empty)
-                    break
+                logger.info("第 {} 页: 无记录", page)
+
+            # 翻页
+            if not self._click_next_page():
+                logger.info("翻页失败，扫描结束")
+                break
+
+            # 等页面稳定加载
+            time.sleep(3.0)
+
+            page += 1
 
             # 3. 滑动翻到下一页
             if not self._click_next_page():
@@ -199,12 +203,19 @@ class GachaScanner:
 
         # 检测并分割每条记录条目
         entry_regions = self._detect_entry_regions(img)
-        logger.debug("检测到 {} 个记录条目区域", len(entry_regions))
+        logger.info("检测到 {} 个记录条目", len(entry_regions))
 
         for i, region in enumerate(entry_regions):
             # OCR识别该区域
-            ocr_results = self._ocr.recognize(region)
+            try:
+                # PaddleOCR 期望 RGB 输入，但 region 是 BGR
+                region_rgb = cv2.cvtColor(region, cv2.COLOR_BGR2RGB)
+                ocr_results = self._ocr.recognize(region_rgb)
+            except Exception as e:
+                logger.warning("OCR 识别异常: {}", e)
+                continue
             texts = [r["text"] for r in ocr_results]
+            logger.debug("条目{} OCR 结果: {}", i + 1, texts)
 
             if not texts:
                 continue
@@ -212,6 +223,7 @@ class GachaScanner:
             # 解析记录
             self._pull_counter += 1
             record = self._parser.parse_record_from_texts(texts, self._pull_counter)
+            logger.debug("条目{} 解析: {} -> {}", i + 1, texts, record.character_name if record else "失败")
 
             if record is None:
                 # 尝试用颜色辅助判断稀有度
@@ -237,69 +249,31 @@ class GachaScanner:
     def _detect_entry_regions(self, img: np.ndarray) -> list[np.ndarray]:
         """
         检测截图中每条抽卡记录的区域
-
-        策略：
-        1. 通过颜色/边缘检测定位每条记录的水平分割线
-        2. 每条记录通常有固定的高度范围
-        3. 返回每个条目区域的截图
+        物华弥新每页固定10条记录，直接按高度等分
         """
         h, w = img.shape[:2]
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        # 边缘检测
-        edges = cv2.Canny(gray, 50, 150)
-
-        # 水平投影（找到水平分割线）
-        horizontal_projection = np.mean(edges, axis=1)
-
-        # 找到分割线位置（水平投影值高的行）
-        threshold = np.mean(horizontal_projection) * 1.5
-        split_lines = np.where(horizontal_projection > threshold)[0]
-
-        if len(split_lines) == 0:
-            # 没有找到分割线，可能是一整页新样式
-            # 尝试按固定高度分割
-            return self._split_by_height(img, h)
-
-        # 将相邻的分割线合并
-        merged_lines = self._merge_lines(split_lines.tolist(), gap=5)
-
-        # 根据分割线提取条目区域
         regions = []
-        for i in range(len(merged_lines) - 1):
-            y1 = merged_lines[i]
-            y2 = merged_lines[i + 1]
-            region_h = y2 - y1
-            if self._record_h_min <= region_h <= self._record_h_max:
-                regions.append(img[y1:y2, :])
 
-        # 如果没有找到有效区域，使用固定高度分割
-        if not regions:
-            return self._split_by_height(img, h)
+        # 跳过顶部标题+表头（约 100px），剩余区域等分10份
+        header_h = 100
+        footer_h = 20
+        content_h = h - header_h - footer_h
+        record_h = content_h // 10
+
+        for i in range(10):
+            y1 = header_h + i * record_h
+            y2 = y1 + record_h
+            if y2 > h - footer_h:
+                break
+            regions.append(img[y1:y2, :])
 
         return regions
 
-    def _split_by_height(self, img: np.ndarray, h: int) -> list[np.ndarray]:
-        """按固定高度分割条目（兜底方案）"""
-        regions = []
-        record_height = 120  # 默认每条记录约120px高
-        y = 0
-        while y + record_height <= h:
-            regions.append(img[y:y + record_height, :])
-            y += record_height
-        return regions
+    # ── 辅助 ──────────────────────────────────────────
 
-    def _merge_lines(self, lines: list[int], gap: int = 5) -> list[int]:
-        """合并相邻的分割线"""
-        if not lines:
-            return []
-        merged = [lines[0]]
-        for val in lines[1:]:
-            if val - merged[-1] > gap:
-                merged.append(val)
-        return merged
-
-    def _click_next_page(self) -> bool:
+    def _notify_progress(self, current: int, total: int, info: str) -> None:
+        if self._on_progress:
+            self._on_progress(current, total, info)
         """
         点击"下一页"按钮翻页
         先尝试模板匹配定位按钮，失败则用预设坐标点击
@@ -341,8 +315,50 @@ class GachaScanner:
         diff = cv2.absdiff(before, after)
         diff_ratio = np.count_nonzero(cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY) > 30) / diff.size
 
-        logger.debug("页面变化率: {:.2%}", diff_ratio)
-        return diff_ratio > 0.01  # 至少1%像素有变化
+        logger.info("页面变化率: {:.2%}", diff_ratio)
+        return diff_ratio > 0.002  # 降低到0.2%
+
+    def _click_next_page(self) -> bool:
+        """
+        点击"下一页"按钮翻页
+        模板匹配到了就信任，没匹配到用像素对比
+        """
+        before = self._screenshot.capture_as_array()
+        if before is None:
+            return False
+
+        # 模板匹配找"下一页"按钮
+        clicked_template = False
+        if self._detector.has_template(GamePage.GACHA_RECORD):
+            next_btn = self._detector._templates_dir / "gacha_record" / "next_page.png"
+            if next_btn.exists():
+                template = cv2.imread(str(next_btn))
+                if template is not None:
+                    pos = self._detector.find_button(before, template)
+                    if pos:
+                        logger.info("点击下一页 ({}, {})", pos[0], pos[1])
+                        self._adb.click(pos[0], pos[1])
+                        clicked_template = True
+
+        if not clicked_template:
+            x, y = self._navigator._coord("next_page_button")
+            logger.info("坐标点击下一页 ({}, {})", x, y)
+            self._adb.click(x, y)
+
+        time.sleep(2.0)  # 等待翻页完成后页面加载
+
+        # 模板匹配到的直接信任
+        if clicked_template:
+            return True
+
+        after = self._screenshot.capture_as_array()
+        if after is None:
+            return False
+
+        diff = cv2.absdiff(before, after)
+        ratio = np.count_nonzero(cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY) > 30) / diff.size
+        logger.info("翻页像素变化: {:.2%}", ratio)
+        return ratio > 0.002
 
     def _extract_name_from_ocr(self, ocr_results: list[dict]) -> Optional[str]:
         """从OCR结果中提取最可能的器者名称"""

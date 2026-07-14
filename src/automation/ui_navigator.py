@@ -119,60 +119,72 @@ class UINavigator:
         返回是否成功
         """
         self._set_state(NavState.NAVIGATING_TO_GACHA)
-        max_retries = 3
+
+        # 如果已有模板，尝试页面识别导航
+        if self._detector.has_template(GamePage.MAIN) or \
+           self._detector.has_template(GamePage.GACHA_RECORD):
+            return self._navigate_by_template()
+
+        # 没有模板，盲操作：假定用户已在召集记录页面
+        return self._blind_navigate()
+
+    def _navigate_by_template(self) -> bool:
+        """基于模板匹配的页面导航"""
+        max_retries = 5
 
         for attempt in range(max_retries):
-            # 1. 截图看当前页面
             img = self._screenshot.capture_as_array()
             if img is None:
-                logger.error("截图失败")
                 time.sleep(1)
                 continue
 
             current_page = self._detector.detect(img)
-            logger.info("当前页面: {} (尝试 {}/{})", current_page.name, attempt + 1, max_retries)
+            logger.info("页面: {} (尝试 {}/{})", current_page.name, attempt + 1, max_retries)
 
-            if current_page in (GamePage.GACHA_RECORD, GamePage.GACHA_DETAIL):
+            if current_page == GamePage.GACHA_RECORD:
                 self._set_state(NavState.AT_RECORDS)
                 return True
 
             if current_page == GamePage.MAIN:
-                # 点击"招集"按钮
                 x, y = self._coord("gacha_button")
-                logger.info("点击招集按钮 ({}, {})", x, y)
+                logger.info("点击招集 ({}, {})", x, y)
                 self._adb.click(x, y)
-                time.sleep(1.5)
+                time.sleep(2)
 
-            elif current_page in (GamePage.GACHA_ENTRANCE, GamePage.GACHA_HOME):
-                # 点击"召集记录"按钮
+            elif current_page == GamePage.GACHA_HOME:
                 x, y = self._coord("record_button")
-                logger.info("点击召集记录按钮 ({}, {})", x, y)
+                logger.info("点击召集记录 ({}, {})", x, y)
                 self._adb.click(x, y)
-                time.sleep(1.5)
+                time.sleep(2)
 
-            elif current_page == GamePage.OTHER:
-                # 未知页面，尝试返回
-                logger.info("未知页面，尝试返回")
-                self._adb.send_keyevent(4)  # KEYCODE_BACK
-                time.sleep(1)
-
-            else:  # UNKNOWN
-                # 当模板匹配不可用时，尝试盲操作
-                logger.info("模板不可用，尝试盲操作导航")
-                if attempt == 0:
-                    # 先点击招集按钮位置
-                    x, y = self._coord("gacha_button")
-                    self._adb.click(x, y)
+            else:
+                # UNKNOWN - 尝试按顺序盲点
+                logger.info("未识别页面，尝试盲操作")
+                if attempt < 3:
+                    self._adb.click(*self._coord("gacha_button"))
                     time.sleep(2)
-                elif attempt == 1:
-                    # 再点击召集记录按钮
-                    x, y = self._coord("record_button")
-                    self._adb.click(x, y)
+                    self._adb.click(*self._coord("record_button"))
                     time.sleep(2)
+                else:
+                    break
 
         self._set_state(NavState.ERROR)
-        logger.error("无法导航到召集记录页面")
         return False
+
+    def _blind_navigate(self) -> bool:
+        """无模板时的盲导航：假定已在召集记录页，尝试验证"""
+        logger.info("模板未加载，假定已在召集记录页")
+        # 做一次测试点击（右下角空白区域），验证ADB工作
+        img = self._screenshot.capture_as_array()
+        if img is None:
+            self._set_state(NavState.ERROR)
+            return False
+        h, w = img.shape[:2]
+        # 在右下角点一下（不干扰游戏操作）
+        self._adb.click(w - 50, h - 20)
+        time.sleep(0.3)
+        self._set_state(NavState.AT_RECORDS)
+        return True
 
     def go_back(self) -> None:
         """返回上一页"""

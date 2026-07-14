@@ -25,19 +25,17 @@ class GachaRecordParser:
 
     # 常见时间格式正则
     TIME_PATTERNS = [
+        # "2025年01月15日14时30分" — 物华弥新实际格式
+        re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(\d{1,2})\s*时\s*(\d{1,2})\s*分"),
+        # "2025-01-15 14:30:00" — 备选
         re.compile(r"(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(:\d{2})?)"),
-        re.compile(r"(\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2})"),
     ]
 
     # 稀有度关键词
     RARITY_KEYWORDS = {
         "特出": Rarity.SPECIAL,
         "优异": Rarity.EXCELLENT,
-        "精良": Rarity.FINE,
-        # 也可能用星级表示
-        "★★★★★": Rarity.SPECIAL,
-        "★★★★": Rarity.EXCELLENT,
-        "★★★": Rarity.FINE,
+        "新生": Rarity.FINE,
     }
 
     def __init__(self, banner_name: str = "") -> None:
@@ -70,6 +68,12 @@ class GachaRecordParser:
         character_name = self._extract_character_name(texts)
         rarity = self._extract_rarity(texts)
         pull_time = self._extract_time(full_text)
+
+        # 提取卡池名称（召集列：限时/卡池名 或 限定/卡池名）
+        banner_from_ocr = self._extract_banner(texts)
+        if banner_from_ocr:
+            self.banner_name = banner_from_ocr
+            self.banner_type = BannerType.EVENT  # 限时/限定都属于活动卡池
 
         if not character_name or rarity is None:
             logger.debug("解析失败 - 文本: {}", texts)
@@ -114,22 +118,29 @@ class GachaRecordParser:
         """
         从文本行中提取器者名称
 
-        策略：最长的中文字符串很可能是器者名称
-        （器者名称如"万工轿"、"T型帛画"、"战国水晶杯"等）
+        物华弥新召集记录为四列表格：稀有度 | 器者 | 召集 | 时间
+        OCR 识别的文本通常按从左到右、从上到下排列
+        如果有4条文本，第2条（索引1）就是器者名称
         """
+        # 策略1：恰好4条文本 — 按表格列顺序，取第2列
+        if len(texts) == 4:
+            name = texts[1].strip()
+            # 过滤掉明显不是名称的内容
+            if len(name) >= 1 and not re.match(r"^\d+$", name):
+                return name
+
+        # 策略2：从所有文本中找最长且合理的名称
         best_name = ""
         best_len = 0
-
         for text in texts:
-            # 提取中文+常见符号的名称候选
-            # 器者名称可能包含中文、字母、数字
             cleaned = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9·]", "", text.strip())
             if len(cleaned) >= 2 and len(cleaned) > best_len:
-                # 排除明显不是名称的内容（纯数字、时间格式等）
                 if not re.match(r"^\d{2,}$", cleaned):
                     if not re.match(r"\d{4}[-/年]", cleaned):
-                        best_name = cleaned
-                        best_len = len(cleaned)
+                        # 排除稀有度关键词
+                        if cleaned not in ("特出", "优异", "新生"):
+                            best_name = cleaned
+                            best_len = len(cleaned)
 
         return best_name if best_name else None
 
@@ -141,20 +152,47 @@ class GachaRecordParser:
                 return rarity
         return None
 
+    def _extract_banner(self, texts: list[str]) -> Optional[str]:
+        """
+        从文本中提取卡池名称
+        物华弥新格式：召集列为 "限时/卡池名" 或 "限定/卡池名"
+        """
+        for text in texts:
+            text = text.strip()
+            # 匹配 "限时/XXX" 或 "限定/XXX" 格式
+            if "/" in text and len(text) >= 3:
+                # 取 "/" 后的卡池名称
+                parts = text.split("/", 1)
+                if len(parts) == 2 and parts[1]:
+                    return parts[1].strip()
+                return text.strip()
+            # 直接匹配 "限时" 或 "限定" 开头
+            if text.startswith(("限时", "限定")) and len(text) > 2:
+                return text[2:].strip()
+        return None
+
     def _extract_time(self, text: str) -> Optional[datetime]:
         """从文本中提取时间"""
         for pattern in self.TIME_PATTERNS:
             match = pattern.search(text)
             if match:
+                groups = match.groups()
+                # 格式1: "2025年01月15日14时30分" → groups = (2025, 01, 15, 14, 30)
+                if len(groups) == 5 and groups[4] is not None:
+                    try:
+                        return datetime(
+                            int(groups[0]), int(groups[1]), int(groups[2]),
+                            int(groups[3]), int(groups[4]),
+                        )
+                    except ValueError:
+                        pass
+                # 格式2: "2025-01-15 14:30:00" 或 "2025-01-15 14:30"
                 time_str = match.group(1)
-                # 尝试多种格式解析
                 for fmt in [
                     "%Y-%m-%d %H:%M:%S",
                     "%Y-%m-%d %H:%M",
                     "%Y/%m/%d %H:%M:%S",
                     "%Y/%m/%d %H:%M",
-                    "%Y年%m月%d日 %H:%M",
-                    "%Y年%m月%d日 %H:%M:%S",
                 ]:
                     try:
                         return datetime.strptime(time_str, fmt)

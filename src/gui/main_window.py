@@ -1,169 +1,427 @@
 """
 桌面GUI - 主窗口
-基于 PyQt6 的单窗口多页面布局
+ALAS风格：简洁紧凑，左侧导航 + 右侧内容 + 底部日志
 """
-
 import sys
 from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QPushButton, QLabel, QStatusBar, QFrame,
+    QTextEdit, QSplitter,
 )
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QIcon, QFont
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 
 from src.config import config
-from src.storage.database import db
-from src.emulator.adb_client import ADBClient, auto_detect_device
-from src.automation.gacha_scanner import create_scanner, GachaScanner
+from src.emulator.adb_client import ADBClient
+from src.automation.gacha_scanner import GachaScanner
 from src.gui.pages.home_page import HomePage
 from src.gui.pages.record_page import RecordPage
 from src.gui.pages.analysis_page import AnalysisPage
 from src.gui.pages.settings_page import SettingsPage
 
+STYLE = """
+/* === 全局 === */
+* {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    font-size: 13px;
+}
+QMainWindow {
+    background-color: #1e1e1e;
+}
+
+/* === 输入控件 === */
+QLineEdit {
+    background-color: #2d2d2d;
+    color: #d4d4d4;
+    border: 1px solid #3c3c3c;
+    border-radius: 4px;
+    padding: 4px 8px;
+    selection-background-color: #264f78;
+}
+QLineEdit:focus {
+    border-color: #007acc;
+}
+QComboBox {
+    background-color: #2d2d2d;
+    color: #d4d4d4;
+    border: 1px solid #3c3c3c;
+    border-radius: 4px;
+    padding: 4px 8px;
+    min-width: 120px;
+}
+QComboBox:hover { border-color: #007acc; }
+QComboBox::drop-down {
+    border: none;
+    padding-right: 8px;
+}
+QComboBox QAbstractItemView {
+    background-color: #2d2d2d;
+    color: #d4d4d4;
+    border: 1px solid #3c3c3c;
+    selection-background-color: #264f78;
+    outline: none;
+}
+QSpinBox {
+    background-color: #2d2d2d;
+    color: #d4d4d4;
+    border: 1px solid #3c3c3c;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+QSpinBox:focus { border-color: #007acc; }
+
+/* === 按钮 === */
+QPushButton {
+    background-color: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #4a4a4a;
+    border-radius: 4px;
+    padding: 5px 14px;
+}
+QPushButton:hover {
+    background-color: #4a4a4a;
+    border-color: #5a5a5a;
+}
+QPushButton:pressed {
+    background-color: #2d2d2d;
+}
+QPushButton:disabled {
+    background-color: #2a2a2a;
+    color: #666;
+}
+QPushButton[primary="true"] {
+    background-color: #007acc;
+    border-color: #007acc;
+    color: white;
+}
+QPushButton[primary="true"]:hover {
+    background-color: #1a8cd8;
+}
+QPushButton[danger="true"] {
+    background-color: #c0392b;
+    border-color: #c0392b;
+    color: white;
+}
+QPushButton[danger="true"]:hover {
+    background-color: #e74c3c;
+}
+
+/* === 标签 === */
+QLabel {
+    color: #d4d4d4;
+}
+
+/* === 分组框 === */
+QGroupBox {
+    color: #e0e0e0;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    margin-top: 14px;
+    padding: 16px 12px 12px 12px;
+    font-weight: bold;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+    color: #e0e0e0;
+}
+
+/* === 表格 === */
+QTableWidget {
+    background-color: #252526;
+    color: #d4d4d4;
+    border: 1px solid #3c3c3c;
+    border-radius: 4px;
+    gridline-color: #333;
+}
+QTableWidget::item { padding: 4px 8px; }
+QTableWidget::item:selected {
+    background-color: #264f78;
+    color: white;
+}
+QHeaderView::section {
+    background-color: #2d2d2d;
+    color: #d4d4d4;
+    border: none;
+    border-bottom: 1px solid #3c3c3c;
+    padding: 6px 8px;
+    font-weight: bold;
+}
+
+/* === 滚动条 === */
+QScrollBar:vertical {
+    background: #1e1e1e;
+    width: 8px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical {
+    background: #555;
+    border-radius: 4px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover { background: #777; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+
+/* === 滚动区域 === */
+QScrollArea { border: none; }
+
+/* === 状态栏 === */
+QStatusBar {
+    background-color: #007acc;
+    color: white;
+    border: none;
+    padding: 2px 8px;
+    font-size: 12px;
+}
+
+/* === 日志输出 === */
+QTextEdit {
+    background-color: #1a1a1a;
+    color: #a0a0a0;
+    border: none;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 12px;
+}
+
+/* === 标签页 === */
+QTabWidget::pane { border: 1px solid #3c3c3c; background: #252526; }
+QTabBar::tab {
+    background: #2d2d2d;
+    color: #999;
+    padding: 6px 16px;
+    border: none;
+    border-bottom: 2px solid transparent;
+}
+QTabBar::tab:selected {
+    color: #e0e0e0;
+    border-bottom: 2px solid #007acc;
+}
+QTabBar::tab:hover { color: #d4d4d4; }
+
+/* === 标题栏 === */
+#titleBar {
+    background-color: #007acc;
+    border: none;
+}
+#titleLabel {
+    color: white;
+    font-size: 14px;
+    font-weight: bold;
+}
+#deviceLabel {
+    color: rgba(255,255,255,0.8);
+    font-size: 12px;
+}
+
+/* === 侧边栏 === */
+#sidebar {
+    background-color: #252526;
+    border-right: 1px solid #3c3c3c;
+}
+#navButton {
+    background-color: transparent;
+    color: #ccc;
+    border: none;
+    border-radius: 4px;
+    text-align: left;
+    padding: 8px 16px;
+    font-size: 13px;
+}
+#navButton:hover {
+    background-color: #2d2d2d;
+    color: #e0e0e0;
+}
+#navButton:checked {
+    background-color: #37373d;
+    color: white;
+    border-left: 3px solid #007acc;
+}
+"""
+
 
 class MainWindow(QMainWindow):
-    """主窗口"""
-
     def __init__(self) -> None:
         super().__init__()
-
         self._adb: Optional[ADBClient] = None
         self._scanner: Optional[GachaScanner] = None
-
         self._setup_ui()
-        self._apply_theme()
-
-        # 默认显示首页
+        self.setStyleSheet(STYLE)
         self._nav_buttons[0].setChecked(True)
         self._stack.setCurrentIndex(0)
 
     def _setup_ui(self) -> None:
-        """初始化UI"""
-        width = config.get("gui.window_width", 1200)
-        height = config.get("gui.window_height", 800)
-        self.setWindowTitle("物华弥新抽卡分析器")
-        self.setMinimumSize(900, 600)
-        self.resize(width, height)
-
-        # ── 中心控件 ──────────────────────────────
+        w, h = config.get("gui.window_width", 1100), config.get("gui.window_height", 680)
+        self.setWindowTitle("WuHuaGachaAnalysis")
+        self.setMinimumSize(800, 500)
+        self.resize(w, h)
 
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # ── 顶部标题栏 ────────────────────────────
+        # ── 顶栏 ──
+        bar = QFrame()
+        bar.setObjectName("titleBar")
+        bar.setFixedHeight(40)
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(12, 0, 12, 0)
+        t = QLabel("物华弥新 抽卡分析器")
+        t.setObjectName("titleLabel")
+        t.setFont(QFont("", 12, QFont.Weight.Bold))
+        bl.addWidget(t)
+        bl.addStretch()
+        self._dev_lbl = QLabel("设备: --")
+        self._dev_lbl.setObjectName("deviceLabel")
+        bl.addWidget(self._dev_lbl)
+        root.addWidget(bar)
 
-        title_bar = QFrame()
-        title_bar.setObjectName("titleBar")
-        title_bar.setFixedHeight(52)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 0, 16, 0)
+        # ── 中部分割（左侧栏 + 右内容 + 底日志） ──
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        top = QWidget()
+        top_layout = QHBoxLayout(top)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(0)
 
-        title_label = QLabel("🎴 物华弥新 抽卡分析器")
-        title_label.setObjectName("titleLabel")
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_layout.addWidget(title_label)
-
-        title_layout.addStretch()
-
-        # 设备状态
-        self._device_label = QLabel("🔌 设备未连接")
-        self._device_label.setObjectName("deviceLabel")
-        title_layout.addWidget(self._device_label)
-
-        main_layout.addWidget(title_bar)
-
-        # ── 内容区（侧栏 + 页面） ──────────────────
-
-        content_layout = QHBoxLayout()
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # 侧边导航栏
+        # 左侧栏
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(180)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(8, 12, 8, 12)
-        sidebar_layout.setSpacing(4)
+        sidebar.setFixedWidth(140)
+        sl = QVBoxLayout(sidebar)
+        sl.setContentsMargins(4, 8, 4, 8)
+        sl.setSpacing(2)
 
         self._nav_buttons: list[QPushButton] = []
-        nav_items = [
-            ("🏠", "首页概览"),
-            ("📋", "抽卡记录"),
-            ("📊", "统计分析"),
-            ("⚙️", "设置"),
-        ]
+        for text in ["概览", "记录", "分析", "设置"]:
+            b = QPushButton(text)
+            b.setObjectName("navButton")
+            b.setCheckable(True)
+            b.setFixedHeight(36)
+            b.clicked.connect(self._on_nav)
+            sl.addWidget(b)
+            self._nav_buttons.append(b)
 
-        for icon, text in nav_items:
-            btn = QPushButton(f"  {icon}  {text}")
-            btn.setObjectName("navButton")
-            btn.setCheckable(True)
-            btn.setFixedHeight(40)
-            btn.clicked.connect(self._on_nav_click)
-            sidebar_layout.addWidget(btn)
-            self._nav_buttons.append(btn)
+        sl.addStretch()
 
-        sidebar_layout.addStretch()
-
-        # 一键扫描按钮
-        self._scan_btn = QPushButton("  🔍 开始扫描")
+        self._scan_btn = QPushButton("开始扫描")
         self._scan_btn.setObjectName("scanButton")
-        self._scan_btn.setFixedHeight(44)
-        self._scan_btn.clicked.connect(self._on_scan_click)
-        sidebar_layout.addWidget(self._scan_btn)
+        self._scan_btn.setProperty("danger", True)
+        self._scan_btn.setFixedHeight(38)
+        self._scan_btn.clicked.connect(self._on_scan)
+        sl.addWidget(self._scan_btn)
 
-        content_layout.addWidget(sidebar)
+        top_layout.addWidget(sidebar)
 
-        # 页面栈
+        # 右侧内容区
         self._stack = QStackedWidget()
         self._pages = [
             HomePage(self),
             RecordPage(self),
             AnalysisPage(self),
-            SettingsPage(self),
+            s := SettingsPage(self),
         ]
-        for page in self._pages:
-            self._stack.addWidget(page)
+        s.on_adb_connected = self._on_adb_ready
+        self._pages = [HomePage(self), RecordPage(self), AnalysisPage(self), s]
+        for p in self._pages:
+            self._stack.addWidget(p)
+        top_layout.addWidget(self._stack)
 
-        content_layout.addWidget(self._stack)
-        main_layout.addLayout(content_layout)
+        splitter.addWidget(top)
 
-        # ── 状态栏 ──────────────────────────────────
+        # ── 底部日志 ──
+        log_widget = QWidget()
+        log_layout = QVBoxLayout(log_widget)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_bar = QFrame()
+        log_bar.setFixedHeight(22)
+        log_bar.setStyleSheet("background:#333; border:none; padding:2px 8px;")
+        log_bl = QHBoxLayout(log_bar)
+        log_bl.setContentsMargins(8, 0, 8, 0)
+        log_bl.addWidget(QLabel("日志"))
+        log_bl.addStretch()
+        log_layout.addWidget(log_bar)
 
-        self._status_bar = QStatusBar()
-        self._status_bar.showMessage("就绪 — 物华弥新抽卡分析器 v1.0")
-        self.setStatusBar(self._status_bar)
+        self._log = QTextEdit()
+        self._log.setReadOnly(True)
+        self._log.document().setMaximumBlockCount(2000)
+        log_layout.addWidget(self._log)
+        splitter.addWidget(log_widget)
+        splitter.setSizes([420, 140])
 
-    def _on_nav_click(self) -> None:
-        """导航按钮点击"""
-        sender = self.sender()
-        for i, btn in enumerate(self._nav_buttons):
-            if btn is sender:
-                btn.setChecked(True)
+        root.addWidget(splitter)
+
+        # ── 状态栏 ──
+        self._status = QStatusBar()
+        self._status.showMessage("就绪")
+        self.setStatusBar(self._status)
+
+    def log(self, msg: str) -> None:
+        self._log.append(msg)
+
+    def set_device_status(self, text: str) -> None:
+        self._dev_lbl.setText(f"设备: {text}")
+
+    def set_scan_enabled(self, enabled: bool) -> None:
+        self._scan_btn.setEnabled(enabled)
+        self._scan_btn.setText("开始扫描" if enabled else "扫描中...")
+
+    def set_status(self, msg: str) -> None:
+        self._status.showMessage(msg)
+
+    def _on_nav(self) -> None:
+        s = self.sender()
+        for i, b in enumerate(self._nav_buttons):
+            if b is s:
+                b.setChecked(True)
                 self._stack.setCurrentIndex(i)
                 self._pages[i].on_activated()
             else:
-                btn.setChecked(False)
+                b.setChecked(False)
 
-    def _on_scan_click(self) -> None:
-        """开始扫描按钮点击"""
-        self._scan_btn.setEnabled(False)
-        self._scan_btn.setText("  ⏳ 扫描中...")
-        self._status_bar.showMessage("正在连接模拟器并扫描...")
+    def _on_adb_ready(self, adb: ADBClient) -> None:
+        self._adb = adb
+        self.set_device_status(f"{adb._serial}")
+        self.log(f"[INFO] ADB 已连接: {adb._serial}")
 
-        # 切换到首页显示进度
-        self._nav_buttons[0].setChecked(True)
-        self._stack.setCurrentIndex(1)
+    def _on_scan(self) -> None:
+        if self._adb is None:
+            self.log("[ERROR] 请先在设置页连接模拟器")
+            self.set_status("请先连接模拟器")
+            return
 
-    # ── 公共接口 ───────────────────────────────────
+        self.set_scan_enabled(False)
+        self.set_status("正在扫描...")
+        self.log("[INFO] 开始扫描召集记录...")
+
+        from src.automation.gacha_scanner import create_scanner
+        from src.models.gacha_record import BannerType
+        import threading
+
+        self._scanner = create_scanner(self._adb)
+        self._scanner.set_banner("活动招募", BannerType.EVENT)
+        self._scanner.on_progress(lambda cur, total, info: self.log(f"[进度] {info}"))
+        self._scanner.on_record_found(lambda r: self.log(f"[记录] {r.character_name} ★{r.rarity.value} {r.banner_name}"))
+
+        def _run():
+            try:
+                records = self._scanner.scan_all()
+                self.log(f"[完成] 共扫描 {len(records)} 条记录")
+                self.set_status(f"扫描完成，共 {len(records)} 条")
+                # 刷新所有页面
+                self._pages[0].refresh()
+                self._pages[1].refresh()
+                self._pages[2].refresh()
+            except Exception as e:
+                self.log(f"[ERROR] {e}")
+                self.set_status("扫描失败")
+            finally:
+                self.set_scan_enabled(True)
+
+        threading.Thread(target=_run, daemon=True).start()
 
     @property
     def adb(self) -> Optional[ADBClient]:
@@ -173,142 +431,16 @@ class MainWindow(QMainWindow):
     def scanner(self) -> Optional[GachaScanner]:
         return self._scanner
 
-    def set_status(self, message: str) -> None:
-        self._status_bar.showMessage(message)
-
     def refresh_all_pages(self) -> None:
-        """刷新所有页面数据"""
-        for page in self._pages:
-            page.refresh()
-
-    def _apply_theme(self) -> None:
-        """应用样式主题"""
-        theme = config.get("gui.theme", "light")
-
-        if theme == "light":
-            self.setStyleSheet("""
-                QMainWindow {
-                    background-color: #f5f6fa;
-                }
-                #titleBar {
-                    background-color: #ffffff;
-                    border-bottom: 1px solid #e0e0e0;
-                }
-                #titleLabel {
-                    color: #2c3e50;
-                }
-                #deviceLabel {
-                    color: #7f8c8d;
-                    font-size: 12px;
-                }
-                #sidebar {
-                    background-color: #ffffff;
-                    border-right: 1px solid #e0e0e0;
-                }
-                #navButton {
-                    background-color: transparent;
-                    border: none;
-                    border-radius: 6px;
-                    text-align: left;
-                    padding-left: 12px;
-                    color: #2c3e50;
-                    font-size: 13px;
-                }
-                #navButton:hover {
-                    background-color: #ecf0f1;
-                }
-                #navButton:checked {
-                    background-color: #3498db;
-                    color: white;
-                    font-weight: bold;
-                }
-                #scanButton {
-                    background-color: #e74c3c;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                #scanButton:hover {
-                    background-color: #c0392b;
-                }
-                #scanButton:disabled {
-                    background-color: #bdc3c7;
-                }
-                QStatusBar {
-                    background-color: #ffffff;
-                    border-top: 1px solid #e0e0e0;
-                    color: #7f8c8d;
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                QMainWindow {
-                    background-color: #1a1a2e;
-                }
-                #titleBar {
-                    background-color: #16213e;
-                    border-bottom: 1px solid #0f3460;
-                }
-                #titleLabel {
-                    color: #e0e0e0;
-                }
-                #deviceLabel {
-                    color: #a0a0a0;
-                    font-size: 12px;
-                }
-                #sidebar {
-                    background-color: #16213e;
-                    border-right: 1px solid #0f3460;
-                }
-                #navButton {
-                    background-color: transparent;
-                    border: none;
-                    border-radius: 6px;
-                    text-align: left;
-                    padding-left: 12px;
-                    color: #c0c0c0;
-                    font-size: 13px;
-                }
-                #navButton:hover {
-                    background-color: #0f3460;
-                }
-                #navButton:checked {
-                    background-color: #e94560;
-                    color: white;
-                    font-weight: bold;
-                }
-                #scanButton {
-                    background-color: #e94560;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                #scanButton:hover {
-                    background-color: #c23152;
-                }
-                #scanButton:disabled {
-                    background-color: #555;
-                }
-                QStatusBar {
-                    background-color: #16213e;
-                    border-top: 1px solid #0f3460;
-                    color: #a0a0a0;
-                }
-            """)
+        for p in self._pages:
+            p.refresh()
 
 
 def launch_gui() -> None:
-    """启动 GUI 应用"""
     app = QApplication(sys.argv)
     app.setApplicationName("WuHuaGachaAnalysis")
-
-    window = MainWindow()
-    window.show()
-
+    w = MainWindow()
+    w.show()
     sys.exit(app.exec())
 
 

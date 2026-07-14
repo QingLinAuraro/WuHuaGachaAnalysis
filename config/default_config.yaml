@@ -14,9 +14,13 @@ emulator:
   type: "auto"
   # 各模拟器默认 ADB 端口
   adb_port:
-    mumu: 7555
+    mumu: 16384
     ldplayer: 5555
     bluestacks: 5555
+
+game:
+  # 物华弥新 B站服 包名
+  package_name: "com.cipaishe.wuhua.bilibili"
 
 ocr:
   # OCR 引擎: paddleocr / tesseract
@@ -28,11 +32,11 @@ ocr:
 
 gacha:
   # 翻页后等待时间（秒）
-  scan_page_delay: 0.5
-  # 每条记录的最小高度（像素）
-  record_height_min: 80
+  scan_page_delay: 2.0
+  # 每条记录的最小高度（像素），10条/页 → 每条约55px
+  record_height_min: 45
   # 每条记录的最大高度（像素）
-  record_height_max: 200
+  record_height_max: 85
 
 database:
   # SQLite 数据库文件路径
@@ -40,8 +44,8 @@ database:
 
 gui:
   # 主题: light / dark
-  theme: "light"
+  theme: "dark"
   # 窗口宽度
-  window_width: 1200
+  window_width: 900
   # 窗口高度
-  window_height: 800
+  window_height: 600

@@ -9,10 +9,8 @@
 PyQt6>=6.5.0,<7.0.0
 PyQt6-WebEngine>=6.5.0,<7.0.0
 
-# OCR Engine (PaddleOCR + PaddlePaddle CPU版)
-# 如需GPU版，手动执行: pip install paddlepaddle-gpu==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
-paddleocr>=2.7.0
-paddlepaddle>=2.6.0
+# OCR Engine
+easyocr>=1.7.0
 opencv-python>=4.8.0,<5.0.0
 
 # Image Processing

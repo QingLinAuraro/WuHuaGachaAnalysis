@@ -3,6 +3,8 @@
 封装 ADB 截图功能，提供 Image 对象
 """
 
+import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -24,15 +26,14 @@ class Screenshot:
         self._counter = 0
 
     def capture(self) -> Optional[Image.Image]:
-        """截图并返回 PIL Image 对象"""
-        data = self._adb.screenshot_bytes()
-        if data is None:
-            logger.error("截图数据为空")
+        """截图并返回 PIL Image 对象 — 使用 pull 方式，兼容性更好"""
+        import tempfile
+        tmp = os.path.join(tempfile.gettempdir(), "wuhua_tmp.png")
+        if not self._adb.screenshot(tmp):
+            logger.error("截图失败")
             return None
-
         try:
-            from io import BytesIO
-            return Image.open(BytesIO(data))
+            return Image.open(tmp)
         except Exception as e:
             logger.error("截图解析失败: {}", e)
             return None
@@ -42,22 +43,26 @@ class Screenshot:
         img = self.capture()
         if img is None:
             return None
-        return np.array(img.convert("RGB"))[:, :, ::-1]  # RGB → BGR
+        arr = np.array(img.convert("RGB"))[:, :, ::-1]  # RGB → BGR
+        return np.ascontiguousarray(arr)
 
-    def capture_and_save(self) -> Optional[str]:
-        """截图并保存到文件，返回文件路径"""
-        data = self._adb.screenshot_bytes()
-        if data is None:
-            return None
-
+    def capture_and_save(self) -> Optional[tuple[np.ndarray, str]]:
+        """截图，保存文件并返回 numpy 数组和文件路径"""
         self._counter += 1
-        filename = self._save_dir / f"screen_{self._counter:04d}.png"
-
-        with open(filename, "wb") as f:
-            f.write(data)
-
-        logger.debug("截图已保存: {}", filename)
-        return str(filename)
+        filename = str(self._save_dir / f"screen_{self._counter:04d}.png")
+        ok = self._adb.screenshot(filename)
+        logger.info("ADB截图 {} -> {} ({} bytes)", 
+                     self._counter, "OK" if ok else "FAIL",
+                     Path(filename).stat().st_size if ok and Path(filename).exists() else 0)
+        if not ok:
+            return None
+        try:
+            img = Image.open(filename)
+            arr = np.array(img.convert("RGB"))[:, :, ::-1]
+            return np.ascontiguousarray(arr), filename
+        except Exception as e:
+            logger.error("截图解析失败: {}", e)
+            return None
 
     def reset_counter(self) -> None:
         """重置截图计数器"""

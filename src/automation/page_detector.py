@@ -36,7 +36,7 @@ class PageDetector:
             templates_dir or config.project_root / "assets" / "templates"
         )
         self._templates: dict[GamePage, list[np.ndarray]] = {}
-        self._threshold: float = 0.8  # 匹配阈值
+        self._threshold: float = 0.6  # 匹配阈值（降低以增加容错）
         self._load_templates()
 
     def _load_templates(self) -> None:

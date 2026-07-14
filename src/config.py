@@ -44,17 +44,20 @@ class Config:
         """返回默认配置"""
         return {
             "adb": {
-                "path": "adb",  # 默认使用系统PATH中的adb
+                "path": "adb",  # 默认使用系统PATH中的adb，找不到则自动搜索模拟器目录
                 "serial": "auto",  # 自动检测设备
                 "screenshot_dir": str(self._project_root / "screenshots"),
             },
             "emulator": {
                 "type": "auto",  # auto / mumu / ldplayer / bluestacks
                 "adb_port": {
-                    "mumu": 7555,
+                    "mumu": 16384,
                     "ldplayer": 5555,
                     "bluestacks": 5555,
                 },
+            },
+            "game": {
+                "package_name": "com.cipaishe.wuhua.bilibili",
             },
             "ocr": {
                 "engine": "paddleocr",
@@ -62,17 +65,17 @@ class Config:
                 "use_gpu": False,
             },
             "gacha": {
-                "scan_page_delay": 0.5,  # 翻页后等待秒数
-                "record_height_min": 80,  # 每条记录最小高度（像素）
-                "record_height_max": 200,  # 每条记录最大高度（像素）
+                "scan_page_delay": 1.5,  # 翻页后等待秒数（增加避免触发保护）
+                "record_height_min": 45,  # 每条记录最小高度（像素）
+                "record_height_max": 85,  # 每条记录最大高度（像素）
             },
             "database": {
                 "path": str(self._project_root / "data" / "gacha.db"),
             },
             "gui": {
-                "theme": "light",
-                "window_width": 1200,
-                "window_height": 800,
+                "theme": "dark",
+                "window_width": 900,
+                "window_height": 600,
             },
         }
 

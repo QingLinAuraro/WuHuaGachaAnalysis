@@ -14,7 +14,7 @@ class Rarity(IntEnum):
     """器者稀有度（物华弥新）"""
     SPECIAL = 5   # 特出（红卡 / 5★）
     EXCELLENT = 4 # 优异（黄卡 / 4★）
-    FINE = 3      # 精良（蓝卡 / 3★）
+    FINE = 3      # 新生（蓝卡 / 3★）
     # 可能还有更低的，按需扩展
     COMMON = 2    # 普通
     BASIC = 1     # 基础
