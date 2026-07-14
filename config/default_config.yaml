@@ -1,0 +1,47 @@
+# 物华弥新抽卡分析器 - 默认配置文件
+# ==========================================
+
+adb:
+  # ADB 可执行文件路径，"adb" 表示使用系统 PATH 中的版本
+  path: "adb"
+  # 设备序列号，"auto" 表示自动检测
+  serial: "auto"
+  # 截图保存目录
+  screenshot_dir: "screenshots"
+
+emulator:
+  # 模拟器类型: auto / mumu / ldplayer / bluestacks
+  type: "auto"
+  # 各模拟器默认 ADB 端口
+  adb_port:
+    mumu: 7555
+    ldplayer: 5555
+    bluestacks: 5555
+
+ocr:
+  # OCR 引擎: paddleocr / tesseract
+  engine: "paddleocr"
+  # 识别语言
+  lang: "ch"
+  # 是否使用 GPU 加速
+  use_gpu: false
+
+gacha:
+  # 翻页后等待时间（秒）
+  scan_page_delay: 0.5
+  # 每条记录的最小高度（像素）
+  record_height_min: 80
+  # 每条记录的最大高度（像素）
+  record_height_max: 200
+
+database:
+  # SQLite 数据库文件路径
+  path: "data/gacha.db"
+
+gui:
+  # 主题: light / dark
+  theme: "light"
+  # 窗口宽度
+  window_width: 1200
+  # 窗口高度
+  window_height: 800
