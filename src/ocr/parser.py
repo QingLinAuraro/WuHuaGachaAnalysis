@@ -5,8 +5,11 @@ OCR 结果解析器
 
 import re
 from datetime import datetime
+from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Optional
 
+import yaml
 from loguru import logger
 
 from src.models.gacha_record import GachaRecord, Rarity, BannerType
@@ -41,11 +44,80 @@ class GachaRecordParser:
     def __init__(self, banner_name: str = "") -> None:
         self.banner_name = banner_name
         self.banner_type = BannerType.UNKNOWN
+        self._char_names: list[str] = []
+        self._banner_names: list[str] = []
+        self._banner_up: dict[str, str] = {}  # 卡池名 → UP 角色
+        self._load_name_dict()
 
     def set_banner(self, name: str, banner_type: str = BannerType.UNKNOWN) -> None:
         """设置当前扫描的卡池信息"""
         self.banner_name = name
         self.banner_type = banner_type
+
+    def is_up_character(self, banner_name: str, character_name: str) -> bool:
+        """判断角色是否为指定卡池的 UP 角色（用于歪不歪统计）"""
+        up = self._banner_up.get(banner_name, "")
+        return bool(up) and up == character_name
+
+    # ── 词库加载与模糊匹配 ──────────────────────────
+
+    def _load_name_dict(self) -> None:
+        """加载器者名称和卡池名称词库"""
+        names_path = Path(__file__).parent.parent.parent / "config" / "names.yaml"
+        if not names_path.exists():
+            logger.warning("词库文件不存在: {}", names_path)
+            return
+        try:
+            with open(names_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if data:
+                chars = data.get("characters", "")
+                self._char_names = self._extract_names(chars)
+                banners_raw = data.get("banners", {})
+                if isinstance(banners_raw, dict):
+                    self._banner_up = banners_raw
+                    self._banner_names = list(banners_raw.keys())
+                else:
+                    self._banner_names = banners_raw
+            logger.info("词库已加载: {} 个器者名称, {} 个卡池名称",
+                        len(self._char_names), len(self._banner_names))
+        except Exception as e:
+            logger.warning("词库加载失败: {}", e)
+
+    @staticmethod
+    def _extract_names(node) -> list[str]:
+        """递归提取所有名称，兼容任意嵌套层级（职业→稀有度→名称 等）"""
+        if isinstance(node, str):
+            return [n.strip() for n in node.split("\n") if n.strip()]
+        if isinstance(node, list):
+            return [n.strip() for n in node if n.strip()]
+        if isinstance(node, dict):
+            names = []
+            for v in node.values():
+                names.extend(GachaRecordParser._extract_names(v))
+            return names
+        return []
+
+    @staticmethod
+    def _fuzzy_match(text: str, candidates: list[str], threshold: float = 0.6) -> Optional[str]:
+        """
+        模糊匹配：在候选列表中找最相似的名称
+        threshold: 相似度阈值（0~1），低于此值不返回
+        """
+        if not text or not candidates:
+            return None
+        text = text.strip()
+        best_score = 0.0
+        best_match = None
+        for c in candidates:
+            score = SequenceMatcher(None, text, c).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = c
+        if best_score >= threshold and best_match:
+            logger.debug("模糊匹配: '{}' -> '{}' (相似度: {:.2%})", text, best_match, best_score)
+            return best_match
+        return None
 
     def parse_record_from_texts(
         self,
@@ -53,7 +125,7 @@ class GachaRecordParser:
         pull_number: int = 0,
     ) -> Optional[GachaRecord]:
         """
-        从一组 OCR 识别文本中解析出一条抽卡记录
+        从一组 OCR 识别文本中解析出一条抽卡记录（旧版兼容接口）
 
         Args:
             texts: OCR 识别出的所有文本行
@@ -83,6 +155,94 @@ class GachaRecordParser:
         if pull_time is None:
             pull_time = datetime.now()
             logger.debug("未识别到时间信息，使用当前时间")
+
+        return GachaRecord(
+            character_name=character_name,
+            rarity=rarity,
+            pull_time=pull_time,
+            banner_name=self.banner_name,
+            banner_type=self.banner_type,
+            pull_number=pull_number,
+        )
+
+    # ── 基于列位置的解析（推荐） ──────────────────────
+
+    # 四列在截图中的 x 比例范围（基于 _grid.png 1284px 宽标注）
+    COLUMN_RANGES = [
+        ("rarity", 250 / 1284, 420 / 1284),   # 稀有度
+        ("name",   420 / 1284, 750 / 1284),   # 器者名称
+        ("banner", 750 / 1284, 920 / 1284),   # 卡池
+        ("time",   920 / 1284, 1250 / 1284),  # 时间
+    ]
+
+    def parse_record_from_ocr_results(
+        self,
+        ocr_results: list[dict],
+        img_width: int,
+        pull_number: int = 0,
+    ) -> Optional[GachaRecord]:
+        """
+        从 OCR 结果（含 box 坐标）中按列位置解析抽卡记录
+
+        利用 EasyOCR 返回的 box 坐标，按 x 位置将文本归入四列，
+        再分别提取各字段，避免因 OCR 文本顺序混乱导致的解析错误。
+
+        Args:
+            ocr_results: EasyOCR 返回的识别结果，
+                         每项含 {"text", "confidence", "box"}
+            img_width: 输入图片的宽度（像素），用于比例计算
+            pull_number: 在该卡池中的序号
+
+        Returns:
+            GachaRecord 或 None
+        """
+        if not ocr_results:
+            return None
+
+        # 按 x 坐标归入各列
+        col_texts: dict[str, list[str]] = {
+            "rarity": [], "name": [], "banner": [], "time": []
+        }
+
+        for r in ocr_results:
+            box = r["box"]
+            # 计算文本框的 x 中心
+            xs = [p[0] for p in box]
+            x_center = sum(xs) / len(xs)
+            x_ratio = x_center / img_width
+
+            for col_name, lo, hi in self.COLUMN_RANGES:
+                if lo <= x_ratio <= hi:
+                    col_texts[col_name].append(r["text"])
+                    break
+
+        # 合并各列文本
+        rarity_str = " ".join(col_texts["rarity"])
+        name_str = " ".join(col_texts["name"])
+        banner_str = " ".join(col_texts["banner"])
+        time_str = " ".join(col_texts["time"])
+
+        logger.debug(
+            "列解析: 稀有度=[{}] 器者=[{}] 卡池=[{}] 时间=[{}]",
+            rarity_str, name_str, banner_str, time_str,
+        )
+
+        # 各列提取
+        rarity = self._extract_rarity_from_text(rarity_str)
+        character_name = self._extract_name_from_column(name_str)
+        pull_time = self._extract_time(time_str)
+
+        banner_from_ocr = self._extract_banner_from_text(banner_str)
+        if banner_from_ocr:
+            self.banner_name = banner_from_ocr
+            self.banner_type = BannerType.EVENT
+
+        if not character_name or rarity is None:
+            logger.debug("列解析失败 - 稀有度=[{}] 器者=[{}]", rarity_str, name_str)
+            return None
+
+        if pull_time is None:
+            pull_time = datetime.now()
 
         return GachaRecord(
             character_name=character_name,
@@ -152,6 +312,14 @@ class GachaRecordParser:
                 return rarity
         return None
 
+    def _extract_rarity_from_text(self, text: str) -> Optional[Rarity]:
+        """从单列合并文本中提取稀有度"""
+        text = text.strip()
+        for keyword, rarity in self.RARITY_KEYWORDS.items():
+            if keyword in text:
+                return rarity
+        return None
+
     def _extract_banner(self, texts: list[str]) -> Optional[str]:
         """
         从文本中提取卡池名称
@@ -170,6 +338,40 @@ class GachaRecordParser:
             if text.startswith(("限时", "限定")) and len(text) > 2:
                 return text[2:].strip()
         return None
+
+    def _extract_banner_from_text(self, text: str) -> Optional[str]:
+        """从卡池列合并文本中提取卡池名称"""
+        text = text.strip()
+        if not text:
+            return None
+        if "/" in text and len(text) >= 3:
+            parts = text.split("/", 1)
+            if len(parts) == 2 and parts[1]:
+                raw = parts[1].strip()
+                # 模糊匹配词库纠错
+                matched = self._fuzzy_match(raw, self._banner_names, threshold=0.5)
+                return matched if matched else raw
+            return text.strip()
+        if text.startswith(("限时", "限定")) and len(text) > 2:
+            raw = text[2:].strip()
+            matched = self._fuzzy_match(raw, self._banner_names, threshold=0.5)
+            return matched if matched else raw
+        # 纯卡池名，尝试词库匹配
+        matched = self._fuzzy_match(text, self._banner_names, threshold=0.5)
+        return matched if matched else text
+
+    def _extract_name_from_column(self, text: str) -> Optional[str]:
+        """从器者名称列合并文本中提取名称，并尝试词库纠错"""
+        text = text.strip()
+        if not text:
+            return None
+        # 去除干扰字符，保留中文、字母、数字、·
+        cleaned = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9·]", "", text)
+        if len(cleaned) < 1:
+            return None
+        # 模糊匹配词库纠错
+        matched = self._fuzzy_match(cleaned, self._char_names, threshold=0.5)
+        return matched if matched else cleaned
 
     def _extract_time(self, text: str) -> Optional[datetime]:
         """从文本中提取时间"""

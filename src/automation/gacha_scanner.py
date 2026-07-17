@@ -118,8 +118,6 @@ class GachaScanner:
         page = 1
         max_pages = 500
 
-        import gc
-
         while self._is_running and page <= max_pages:
             logger.info(">>> 开始第 {} 页 <<<", page)
             self._notify_progress(page, 0, f"正在扫描第 {page} 页...")
@@ -154,17 +152,9 @@ class GachaScanner:
                 logger.info("翻页失败，扫描结束")
                 break
 
-            # 等页面稳定加载
-            time.sleep(3.0)
-
-            page += 1
-
-            # 3. 滑动翻到下一页
-            if not self._click_next_page():
-                logger.info("无法继续翻页，可能已到最后一页")
-                break
-
+            # 等待页面稳定加载
             time.sleep(self._page_delay)
+
             page += 1
 
         self._is_running = False
@@ -195,9 +185,10 @@ class GachaScanner:
         扫描单页截图中的所有抽卡记录
 
         步骤：
-        1. 定位每条抽取记录的区域（基于颜色/布局特征）
-        2. 对每个区域进行OCR识别
-        3. 解析为 GachaRecord
+        1. 定位每条抽取记录的区域（按 y 坐标等分）
+        2. 放大 2 倍 + 锐化，提升 OCR 识别率
+        3. OCR 识别，利用 box 坐标按列解析
+        4. 解析为 GachaRecord
         """
         records: list[GachaRecord] = []
 
@@ -206,30 +197,42 @@ class GachaScanner:
         logger.info("检测到 {} 个记录条目", len(entry_regions))
 
         for i, region in enumerate(entry_regions):
-            # OCR识别该区域
             try:
-                # PaddleOCR 期望 RGB 输入，但 region 是 BGR
-                region_rgb = cv2.cvtColor(region, cv2.COLOR_BGR2RGB)
+                # 预处理：放大 2 倍让文字更清晰，减少乱码
+                h, w = region.shape[:2]
+                region_up = cv2.resize(region, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+
+                # 锐化增强文字边缘
+                kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+                region_up = cv2.filter2D(region_up, -1, kernel)
+
+                # EasyOCR 期望 RGB 输入
+                region_rgb = cv2.cvtColor(region_up, cv2.COLOR_BGR2RGB)
                 ocr_results = self._ocr.recognize(region_rgb)
             except Exception as e:
-                logger.warning("OCR 识别异常: {}", e)
-                continue
-            texts = [r["text"] for r in ocr_results]
-            logger.debug("条目{} OCR 结果: {}", i + 1, texts)
-
-            if not texts:
+                logger.warning("条目{} OCR 识别异常: {}", i + 1, e)
                 continue
 
-            # 解析记录
+            if not ocr_results:
+                continue
+
+            logger.debug("条目{} OCR 结果: {}", i + 1, [r["text"] for r in ocr_results])
+
+            # 按列位置解析（利用 box 坐标）
             self._pull_counter += 1
-            record = self._parser.parse_record_from_texts(texts, self._pull_counter)
-            logger.debug("条目{} 解析: {} -> {}", i + 1, texts, record.character_name if record else "失败")
+            record = self._parser.parse_record_from_ocr_results(
+                ocr_results, img_width=w * 2, pull_number=self._pull_counter,
+            )
+            logger.debug(
+                "条目{} 解析: {} -> {}",
+                i + 1, [r["text"] for r in ocr_results],
+                record.character_name if record else "失败",
+            )
 
             if record is None:
-                # 尝试用颜色辅助判断稀有度
+                # 回退：颜色辅助判断稀有度
                 rarity = color_match_rarity(region)
                 if rarity is not None:
-                    # 至少有稀有度信息，尝试构造记录
                     name = self._extract_name_from_ocr(ocr_results)
                     if name:
                         record = GachaRecord(
@@ -250,73 +253,31 @@ class GachaScanner:
         """
         检测截图中每条抽卡记录的区域
         物华弥新每页固定10条记录，直接按高度等分
+
+        页面布局（y坐标）：
+          0-180:   顶部标题
+          180-220: 表头（稀有度、器者、召集、时间）
+          220-560: 10条抽卡记录（340px / 10 = 34px/条）
+          560-640: 页码列表
+          640+:    关闭按钮
         """
         h, w = img.shape[:2]
         regions = []
 
-        # 跳过顶部标题+表头（约 100px），剩余区域等分10份
-        header_h = 100
-        footer_h = 20
-        content_h = h - header_h - footer_h
-        record_h = content_h // 10
+        # 记录从表头下方开始：220px ~ 560px
+        header_h = 220
+        records_bottom = 560
+        content_h = records_bottom - header_h  # 340px
+        record_h = content_h // 10              # 34px/条
 
         for i in range(10):
             y1 = header_h + i * record_h
             y2 = y1 + record_h
-            if y2 > h - footer_h:
-                break
             regions.append(img[y1:y2, :])
 
         return regions
 
     # ── 辅助 ──────────────────────────────────────────
-
-    def _notify_progress(self, current: int, total: int, info: str) -> None:
-        if self._on_progress:
-            self._on_progress(current, total, info)
-        """
-        点击"下一页"按钮翻页
-        先尝试模板匹配定位按钮，失败则用预设坐标点击
-        返回是否成功翻页
-        """
-        # 截图确认当前内容
-        before = self._screenshot.capture_as_array()
-        if before is None:
-            return False
-
-        # 方式1：模板匹配找"下一页"按钮
-        clicked = False
-        if self._detector.has_template(GamePage.GACHA_RECORD):
-            from pathlib import Path
-            next_btn_template_path = self._detector._templates_dir / "gacha_record" / "next_page.png"
-            if next_btn_template_path.exists():
-                template = cv2.imread(str(next_btn_template_path))
-                if template is not None:
-                    pos = self._detector.find_button(before, template)
-                    if pos:
-                        logger.info("模板匹配到下一页按钮: ({}, {})", pos[0], pos[1])
-                        self._adb.click(pos[0], pos[1])
-                        clicked = True
-
-        # 方式2：预设坐标点击（兜底）
-        if not clicked:
-            x, y = self._navigator._coord("next_page_button")
-            logger.info("使用预设坐标点击下一页: ({}, {})", x, y)
-            self._adb.click(x, y)
-
-        time.sleep(1.0)
-
-        # 截图确认内容是否变化
-        after = self._screenshot.capture_as_array()
-        if after is None:
-            return False
-
-        # 比较是否翻页成功（像素差异）
-        diff = cv2.absdiff(before, after)
-        diff_ratio = np.count_nonzero(cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY) > 30) / diff.size
-
-        logger.info("页面变化率: {:.2%}", diff_ratio)
-        return diff_ratio > 0.002  # 降低到0.2%
 
     def _click_next_page(self) -> bool:
         """
@@ -375,8 +336,6 @@ class GachaScanner:
                     best = text
                     best_conf = conf
         return best if best else None
-
-    # ── 辅助 ──────────────────────────────────────────
 
     def _notify_progress(self, current: int, total: int, info: str) -> None:
         if self._on_progress:
