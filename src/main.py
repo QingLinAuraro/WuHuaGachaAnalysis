@@ -40,6 +40,10 @@ def main() -> None:
     setup_logging()
     logger.info("物华弥新抽卡分析器 v{}", __import__("src").__version__)
 
+    # from src.storage.database import db
+    # count = db.clear_all()
+    # logger.info("数据库已清空 ({} 条旧记录)", count)
+
     # 启动 GUI
     from src.gui.main_window import launch_gui
     launch_gui()

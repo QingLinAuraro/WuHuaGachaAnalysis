@@ -2,7 +2,7 @@
 抽卡记录数据模型
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import IntEnum
 from typing import Optional
@@ -22,10 +22,11 @@ class Rarity(IntEnum):
 
 class BannerType(str):
     """卡池类型常量"""
-    EVENT = "event"             # 活动招募
+    EVENT = "event"             # 活动招募（通用）
+    LIMITED_TIME = "限时"        # 限时卡池
+    LIMITED = "限定"             # 限定卡池
     STANDARD = "standard"       # 常规招募
     NEWBIE = "newbie"           # 新人招募
-    COLLECTION = "collection"   # 器者征集
     UNKNOWN = "unknown"         # 未知
 
 
@@ -46,11 +47,20 @@ class GachaRecord:
             self.record_id = self._generate_id()
 
     def _generate_id(self) -> str:
-        """基于关键字段生成唯一ID"""
-        raw = f"{self.character_name}_{self.rarity.value}_{self.pull_time.isoformat()}_{self.banner_name}"
+        """基于关键字段生成唯一ID，含 pull_number 防止同页重复器者碰撞"""
+        raw = f"{self.character_name}_{self.rarity.value}_{self.pull_time.isoformat()}_{self.banner_name}_{self.pull_number}"
         return hashlib.md5(raw.encode()).hexdigest()[:12]
 
     def to_dict(self) -> dict:
+        return {
+            "character_name": self.character_name,
+            "rarity": self.rarity.value,
+            "pull_time": self.pull_time.isoformat(),
+            "banner_name": self.banner_name,
+        }
+
+    def to_dict_full(self) -> dict:
+        """完整导出（调试用）"""
         return {
             "record_id": self.record_id,
             "character_name": self.character_name,
@@ -73,14 +83,3 @@ class GachaRecord:
             banner_type=data.get("banner_type", BannerType.UNKNOWN),
             pull_number=data.get("pull_number", 0),
         )
-
-
-@dataclass
-class GachaBanner:
-    """卡池信息"""
-    name: str                    # 卡池名称
-    banner_type: str             # 卡池类型
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    pity_count: int = 70         # 保底抽数（物华弥新通常是70抽保底）
-    rate_up_characters: list = field(default_factory=list)  # UP角色列表

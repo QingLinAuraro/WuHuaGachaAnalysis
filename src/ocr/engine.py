@@ -1,57 +1,67 @@
 """
-OCR 引擎封装 — EasyOCR，每N页重建防止内存泄漏
+OCR 引擎 — 子进程隔离 PyTorch，批量处理整页记录
 """
 
+import subprocess
+import json
+import tempfile
+import os
+from pathlib import Path
 from typing import Optional
-import gc
 import numpy as np
-from PIL import Image
+import cv2
 from loguru import logger
 
 
+_WORKER_SCRIPT = Path(__file__).parent / "worker.py"
+
+
 class OCREngine:
-    def __init__(self) -> None:
-        self._ocr = None
-        self._call_count = 0
-        self._max_calls = 30  # 每30次OCR调用后重建
+    """OCR 引擎 — 子进程批量处理"""
 
-    def _init(self) -> None:
-        if self._ocr is not None:
-            del self._ocr
-            gc.collect()
-        import easyocr
-        self._ocr = easyocr.Reader(["ch_sim", "en"], gpu=False)
-        self._call_count = 0
-        logger.info("EasyOCR 已就绪")
+    def recognize_page(self, image: np.ndarray, regions: list[tuple[int, int]]) -> list[list[dict]]:
+        """对整页截图的多个区域批量 OCR
+        
+        Args:
+            image: 页面截图 (BGR)
+            regions: [(y1, y2), ...] 每个记录条目的垂直范围
+        
+        Returns:
+            [[{text, confidence, box}, ...], ...] 每个区域的识别结果
+        """
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_in:
+            cv2.imwrite(tmp_in.name, image)
 
-    @property
-    def engine(self):
-        if self._ocr is None:
-            self._init()
-        self._call_count += 1
-        if self._call_count >= self._max_calls:
-            logger.info("OCR 引擎重建（已调用{}次）", self._call_count)
-            self._init()
-        return self._ocr
+        tmp_out = tmp_in.name + ".json"
+        regions_json = json.dumps(regions)
 
-    def recognize(self, image: np.ndarray | Image.Image) -> list[dict]:
-        if isinstance(image, Image.Image):
-            image = np.array(image.convert("RGB"))
-        results = self.engine.readtext(image)
-        parsed = []
-        for box, text, confidence in results:
-            parsed.append({
-                "text": text,
-                "confidence": float(confidence),
-                "box": [[int(p[0]), int(p[1])] for p in box],
-            })
-        return parsed
+        try:
+            proc = subprocess.run(
+                [os.sys.executable, str(_WORKER_SCRIPT), tmp_in.name, regions_json, tmp_out],
+                capture_output=True, text=True, timeout=60,
+            )
+            if proc.returncode != 0:
+                logger.warning("OCR 子进程失败: {}", proc.stderr.strip())
+                return [[] for _ in regions]
 
-    def recognize_text_only(self, image: np.ndarray | Image.Image) -> list[str]:
-        return [r["text"] for r in self.recognize(image)]
+            with open(tmp_out, "r", encoding="utf-8") as f:
+                results = json.load(f)
+            return results
+        except subprocess.TimeoutExpired:
+            logger.warning("OCR 子进程超时")
+            return [[] for _ in regions]
+        except Exception as e:
+            logger.warning("OCR 子进程异常: {}", e)
+            return [[] for _ in regions]
+        finally:
+            for f in [tmp_in.name, tmp_out]:
+                try:
+                    os.unlink(f)
+                except OSError:
+                    pass
 
-    def recognize_region(self, image: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> list[dict]:
-        return self.recognize(image[y1:y2, x1:x2])
+    def shutdown(self) -> None:
+        pass
 
 
 _ocr_engine: Optional[OCREngine] = None

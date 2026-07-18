@@ -115,6 +115,7 @@ class Database:
         rarity: Optional[int] = None,
         limit: int = 0,
         offset: int = 0,
+        order_by: str = "pull_time",
     ) -> list[GachaRecord]:
         """查询抽卡记录，支持筛选和分页"""
         with self.session as s:
@@ -123,7 +124,10 @@ class Database:
                 q = q.filter(GachaRecordORM.banner_name == banner_name)
             if rarity is not None:
                 q = q.filter(GachaRecordORM.rarity == rarity)
-            q = q.order_by(GachaRecordORM.pull_time.desc())
+            if order_by == "pull_number":
+                q = q.order_by(GachaRecordORM.pull_number.asc())
+            else:
+                q = q.order_by(GachaRecordORM.pull_time.desc())
             if offset:
                 q = q.offset(offset)
             if limit:

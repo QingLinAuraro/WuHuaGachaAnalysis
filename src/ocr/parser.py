@@ -30,6 +30,10 @@ class GachaRecordParser:
     TIME_PATTERNS = [
         # "2025年01月15日14时30分" — 物华弥新实际格式
         re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(\d{1,2})\s*时\s*(\d{1,2})\s*分"),
+        # OCR容错: "日"可能被误识别为"8"，如"2025年01月15814时30分"
+        re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日8]\s*(\d{1,2})\s*时\s*(\d{1,2})\s*分"),
+        # OCR容错: 日字完全丢失，如"2025年01月15 14时30分"
+        re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\D+(\d{1,2})\s*时\s*(\d{1,2})\s*分"),
         # "2025-01-15 14:30:00" — 备选
         re.compile(r"(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(:\d{2})?)"),
     ]
@@ -232,10 +236,10 @@ class GachaRecordParser:
         character_name = self._extract_name_from_column(name_str)
         pull_time = self._extract_time(time_str)
 
-        banner_from_ocr = self._extract_banner_from_text(banner_str)
+        banner_from_ocr, pool_type = self._extract_banner_from_text(banner_str)
         if banner_from_ocr:
             self.banner_name = banner_from_ocr
-            self.banner_type = BannerType.EVENT
+            self.banner_type = pool_type or BannerType.EVENT
 
         if not character_name or rarity is None:
             logger.debug("列解析失败 - 稀有度=[{}] 器者=[{}]", rarity_str, name_str)
@@ -339,26 +343,41 @@ class GachaRecordParser:
                 return text[2:].strip()
         return None
 
-    def _extract_banner_from_text(self, text: str) -> Optional[str]:
-        """从卡池列合并文本中提取卡池名称"""
+    def _extract_banner_from_text(self, text: str) -> tuple:
+        """从卡池列合并文本中提取 (卡池名称, 池类型)
+        
+        Returns:
+            (banner_name, pool_type) 或 (None, None)
+            pool_type: '限时' / '限定' / None
+        """
         text = text.strip()
         if not text:
-            return None
+            return None, None
+
+        pool_type = None
+        raw_name = text
+
         if "/" in text and len(text) >= 3:
             parts = text.split("/", 1)
-            if len(parts) == 2 and parts[1]:
-                raw = parts[1].strip()
-                # 模糊匹配词库纠错
-                matched = self._fuzzy_match(raw, self._banner_names, threshold=0.5)
-                return matched if matched else raw
-            return text.strip()
-        if text.startswith(("限时", "限定")) and len(text) > 2:
-            raw = text[2:].strip()
-            matched = self._fuzzy_match(raw, self._banner_names, threshold=0.5)
-            return matched if matched else raw
-        # 纯卡池名，尝试词库匹配
-        matched = self._fuzzy_match(text, self._banner_names, threshold=0.5)
-        return matched if matched else text
+            prefix = parts[0].strip()
+            raw_name = parts[1].strip() if len(parts) > 1 else text
+            if "限时" in prefix:
+                pool_type = BannerType.LIMITED_TIME
+            elif "限定" in prefix:
+                pool_type = BannerType.LIMITED
+        elif text.startswith(("限时", "限定")) and len(text) > 2:
+            if text.startswith("限时"):
+                pool_type = BannerType.LIMITED_TIME
+            else:
+                pool_type = BannerType.LIMITED
+            raw_name = text[2:].strip()
+        else:
+            # 纯卡池名，尝试词库匹配
+            pass
+
+        matched = self._fuzzy_match(raw_name, self._banner_names, threshold=0.5)
+        banner_name = matched if matched else raw_name
+        return banner_name, pool_type
 
     def _extract_name_from_column(self, text: str) -> Optional[str]:
         """从器者名称列合并文本中提取名称，并尝试词库纠错"""

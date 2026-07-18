@@ -225,3 +225,14 @@ screenshots/*.png
 .vscode/
 *.db
 *.sqlite3
+
+# Database directory
+data/
+
+# Export files
+gacha_export*.json
+
+# Root screenshots (only allow template images in assets/)
+*.png
+!assets/**/*.png
+!screenshots/_*.png

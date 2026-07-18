@@ -1,17 +1,27 @@
 """
-ADB 客户端
+ADB 客户端（增强版）
 封装 ADB 命令，提供连接、截图、点击、滑动等操作
+
+新增 ALAS 风格增强：
+  - click_button()      : 在 Button 区域内随机取点点击
+  - screenshot_validate(): 截图 + 质量验证（非黑屏、分辨率正确）
+  - 点击历史追踪          : 防重复点击 + 卡住检测
 """
 
 import subprocess
 import re
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
+import numpy as np
+import cv2
 from loguru import logger
 
 from src.config import config
+
+if TYPE_CHECKING:
+    from src.automation.button import Button
 
 
 class ADBClient:
@@ -120,7 +130,37 @@ class ADBClient:
     def click(self, x: int, y: int) -> bool:
         """点击屏幕指定坐标"""
         code, _ = self.shell(f"input tap {x} {y}")
+        self._record_click(x, y)
         return code == 0
+
+    def click_button(self, button: "Button") -> bool:
+        """在 Button 区域内随机取点点击（模拟人类，防止反外挂检测）
+
+        优先使用模板匹配的精确位置，否则在 button 区域内按正态分布取点。
+
+        Args:
+            button: Button 对象
+
+        Returns:
+            bool
+        """
+        # 如果有模板匹配结果，直接使用
+        if button._match_point is not None:
+            x, y = button._match_point
+        else:
+            # 在 button 区域内随机取点（偏向中心的正态分布）
+            x1, y1, x2, y2 = button.button
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+            sigma_x = max(1, (x2 - x1) // 6)
+            sigma_y = max(1, (y2 - y1) // 6)
+            x = int(np.random.normal(cx, sigma_x))
+            y = int(np.random.normal(cy, sigma_y))
+            x = max(x1, min(x2 - 1, x))
+            y = max(y1, min(y2 - 1, y))
+
+        logger.debug("点击按钮 '{}' @ ({}, {})", button.name, x, y)
+        return self.click(x, y)
 
     def swipe(
         self,
@@ -147,6 +187,20 @@ class ADBClient:
         """发送按键事件 (4=返回, 3=Home, 26=电源)"""
         code, _ = self.shell(f"input keyevent {keycode}")
         return code == 0
+
+    def click_random(
+        self,
+        x1: int, y1: int, x2: int, y2: int,
+    ) -> bool:
+        """在矩形区域内随机取点点击
+
+        Args:
+            x1, y1: 左上角坐标
+            x2, y2: 右下角坐标
+        """
+        x = int(np.random.uniform(x1, x2))
+        y = int(np.random.uniform(y1, y2))
+        return self.click(x, y)
 
     # ── 应用管理 ──────────────────────────────────────
 
@@ -212,6 +266,93 @@ class ADBClient:
         except Exception as e:
             logger.error("截图读取失败: {}", e)
         return None
+
+    def screenshot_validate(self) -> Optional[np.ndarray]:
+        """截图 + 质量验证
+
+        验证内容：
+          1. 非空（连接正常）
+          2. 非全黑（游戏画面正常渲染）
+          3. 分辨率在合理范围（非小窗/缩略图）
+
+        Returns:
+            BGR 格式的 numpy 数组，验证失败返回 None
+        """
+        img_bytes = self.screenshot_bytes()
+        if img_bytes is None:
+            logger.error("截图验证失败: 无法获取截图")
+            return None
+
+        img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        if img is None:
+            logger.error("截图验证失败: 无法解码图像")
+            return None
+
+        h, w = img.shape[:2]
+
+        # 验证分辨率
+        min_w = config.get("automation.image_recognition.min_width", 640)
+        min_h = config.get("automation.image_recognition.min_height", 360)
+        if w < min_w or h < min_h:
+            logger.error("截图验证失败: 分辨率过小 ({}x{})", w, h)
+            return None
+
+        # 验证非全黑
+        mean_val = cv2.mean(img)
+        # mean_val 是 (B, G, R, A) 的均值
+        avg_brightness = (mean_val[0] + mean_val[1] + mean_val[2]) / 3
+        if avg_brightness < 1.0:
+            logger.error("截图验证失败: 全黑画面 (亮度={:.1f})", avg_brightness)
+            return None
+
+        logger.debug("截图验证通过: {}x{}, 平均亮度={:.1f}", w, h, avg_brightness)
+        return img
+
+    # ── 点击历史 & 卡住检测 ────────────────────────────
+
+    def _init_click_history(self) -> None:
+        """初始化点击历史（首次调用 click 时自动初始化）"""
+        if not hasattr(self, "_click_history"):
+            self._click_history: list[tuple[int, int, float]] = []
+            self._stuck_watch: dict = {
+                "button_name": "",
+                "start_time": 0.0,
+                "click_count": 0,
+            }
+
+    def _record_click(self, x: int, y: int) -> None:
+        """记录每次点击"""
+        self._init_click_history()
+        self._click_history.append((x, y, time.time()))
+        # 只保留最近 100 次
+        if len(self._click_history) > 100:
+            self._click_history = self._click_history[-100:]
+
+    def get_click_count(
+        self, button_name: str = "", window_seconds: float = 15.0
+    ) -> int:
+        """获取最近 window_seconds 秒内的点击次数
+
+        Args:
+            button_name: 按钮名（当前仅统计总数，后续可按名称过滤）
+            window_seconds: 时间窗口
+
+        Returns:
+            点击次数
+        """
+        self._init_click_history()
+        if not self._click_history:
+            return 0
+
+        now = time.time()
+        cutoff = now - window_seconds
+        return sum(1 for _, _, t in self._click_history if t >= cutoff)
+
+    def reset_click_history(self) -> None:
+        """重置点击历史"""
+        self._click_history = []
+        self._stuck_watch = {"button_name": "", "start_time": 0.0, "click_count": 0}
 
 
 # ── 设备自动检测 ──────────────────────────────────────

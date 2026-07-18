@@ -10,15 +10,13 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QPushButton, QLabel, QStatusBar, QFrame,
     QTextEdit, QSplitter,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 
 from src.config import config
 from src.emulator.adb_client import ADBClient
 from src.automation.gacha_scanner import GachaScanner
 from src.gui.pages.home_page import HomePage
-from src.gui.pages.record_page import RecordPage
-from src.gui.pages.analysis_page import AnalysisPage
 from src.gui.pages.settings_page import SettingsPage
 
 STYLE = """
@@ -242,15 +240,51 @@ QTabBar::tab:hover { color: #d4d4d4; }
 """
 
 
+class ScannerSignals(QObject):
+    """信号桥 — 后台线程 → 主线程 UI 更新"""
+    log_msg = pyqtSignal(str)
+    status_msg = pyqtSignal(str)
+    scan_done = pyqtSignal(int)
+    scan_error = pyqtSignal(str)
+    record_found = pyqtSignal(str)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._adb: Optional[ADBClient] = None
         self._scanner: Optional[GachaScanner] = None
+        self._signals = ScannerSignals()
         self._setup_ui()
+        self._connect_signals()
         self.setStyleSheet(STYLE)
         self._nav_buttons[0].setChecked(True)
         self._stack.setCurrentIndex(0)
+
+    def _connect_signals(self) -> None:
+        self._signals.log_msg.connect(self._on_log)
+        self._signals.status_msg.connect(self.set_status)
+        self._signals.scan_done.connect(self._on_scan_done)
+        self._signals.scan_error.connect(self._on_scan_error)
+
+    def _on_log(self, msg: str) -> None:
+        self._log.append(msg)
+
+    def _on_scan_done(self, count: int) -> None:
+        self.log_msg(f"[完成] 共扫描 {count} 条记录")
+        self.set_status(f"扫描完成，共 {count} 条")
+        for p in self._pages:
+            p.refresh()
+        self.set_scan_enabled(True)
+
+    def _on_scan_error(self, msg: str) -> None:
+        self.log_msg(f"[ERROR] {msg}")
+        self.set_status("扫描失败")
+        self.set_scan_enabled(True)
+
+    def log_msg(self, msg: str) -> None:
+        """线程安全的日志方法"""
+        self._signals.log_msg.emit(msg)
 
     def _setup_ui(self) -> None:
         w, h = config.get("gui.window_width", 1100), config.get("gui.window_height", 680)
@@ -296,7 +330,7 @@ class MainWindow(QMainWindow):
         sl.setSpacing(2)
 
         self._nav_buttons: list[QPushButton] = []
-        for text in ["概览", "记录", "分析", "设置"]:
+        for text in ["概览", "设置"]:
             b = QPushButton(text)
             b.setObjectName("navButton")
             b.setCheckable(True)
@@ -320,12 +354,10 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         self._pages = [
             HomePage(self),
-            RecordPage(self),
-            AnalysisPage(self),
-            s := SettingsPage(self),
+            SettingsPage(self),
         ]
+        s = self._pages[1]
         s.on_adb_connected = self._on_adb_ready
-        self._pages = [HomePage(self), RecordPage(self), AnalysisPage(self), s]
         for p in self._pages:
             self._stack.addWidget(p)
         top_layout.addWidget(self._stack)
@@ -359,15 +391,19 @@ class MainWindow(QMainWindow):
         self._status.showMessage("就绪")
         self.setStatusBar(self._status)
 
-    def log(self, msg: str) -> None:
-        self._log.append(msg)
-
     def set_device_status(self, text: str) -> None:
         self._dev_lbl.setText(f"设备: {text}")
 
     def set_scan_enabled(self, enabled: bool) -> None:
-        self._scan_btn.setEnabled(enabled)
-        self._scan_btn.setText("开始扫描" if enabled else "扫描中...")
+        self._scan_btn.setEnabled(True)
+        if enabled:
+            self._scan_btn.setText("开始扫描")
+            self._scan_btn.setProperty("danger", True)
+        else:
+            self._scan_btn.setText("停止扫描")
+            self._scan_btn.setProperty("danger", False)
+        self._scan_btn.style().unpolish(self._scan_btn)
+        self._scan_btn.style().polish(self._scan_btn)
 
     def set_status(self, msg: str) -> None:
         self._status.showMessage(msg)
@@ -385,17 +421,24 @@ class MainWindow(QMainWindow):
     def _on_adb_ready(self, adb: ADBClient) -> None:
         self._adb = adb
         self.set_device_status(f"{adb._serial}")
-        self.log(f"[INFO] ADB 已连接: {adb._serial}")
+        self.log_msg(f"[INFO] ADB 已连接: {adb._serial}")
 
     def _on_scan(self) -> None:
+        # 如果正在扫描 → 停止
+        if self._scanner is not None and self._scanner._is_running:
+            self.log_msg("[INFO] 正在停止扫描（当前页完成后停止）...")
+            self._scanner.stop()
+            self.set_status("正在停止...")
+            return
+
         if self._adb is None:
-            self.log("[ERROR] 请先在设置页连接模拟器")
+            self.log_msg("[ERROR] 请先在设置页连接模拟器")
             self.set_status("请先连接模拟器")
             return
 
         self.set_scan_enabled(False)
         self.set_status("正在扫描...")
-        self.log("[INFO] 开始扫描召集记录...")
+        self.log_msg("[INFO] 开始扫描召集记录...")
 
         from src.automation.gacha_scanner import create_scanner
         from src.models.gacha_record import BannerType
@@ -403,23 +446,17 @@ class MainWindow(QMainWindow):
 
         self._scanner = create_scanner(self._adb)
         self._scanner.set_banner("活动招募", BannerType.EVENT)
-        self._scanner.on_progress(lambda cur, total, info: self.log(f"[进度] {info}"))
-        self._scanner.on_record_found(lambda r: self.log(f"[记录] {r.character_name} ★{r.rarity.value} {r.banner_name}"))
+
+        sig = self._signals
+        self._scanner.on_progress(lambda cur, total, info: sig.log_msg.emit(f"[进度] {info}"))
+        self._scanner.on_record_found(lambda r: sig.log_msg.emit(f"[记录] {r.character_name} ★{r.rarity.value} {r.banner_name}"))
 
         def _run():
             try:
                 records = self._scanner.scan_all()
-                self.log(f"[完成] 共扫描 {len(records)} 条记录")
-                self.set_status(f"扫描完成，共 {len(records)} 条")
-                # 刷新所有页面
-                self._pages[0].refresh()
-                self._pages[1].refresh()
-                self._pages[2].refresh()
+                sig.scan_done.emit(len(records))
             except Exception as e:
-                self.log(f"[ERROR] {e}")
-                self.set_status("扫描失败")
-            finally:
-                self.set_scan_enabled(True)
+                sig.scan_error.emit(str(e))
 
         threading.Thread(target=_run, daemon=True).start()
 
