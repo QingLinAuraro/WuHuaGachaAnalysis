@@ -73,18 +73,6 @@ class SettingsPage(QWidget):
         g4l.addWidget(btn_mgr)
         l.addWidget(g4)
 
-        # ── OCR ──
-        g2 = QGroupBox("OCR 识别")
-        g2l = QFormLayout(g2)
-        g2l.setSpacing(8)
-        self._ocr_eng = QComboBox()
-        self._ocr_eng.addItems(["EasyOCR"])
-        g2l.addRow("引擎:", self._ocr_eng)
-        self._ocr_gpu = QComboBox()
-        self._ocr_gpu.addItems(["CPU", "GPU"])
-        g2l.addRow("设备:", self._ocr_gpu)
-        l.addWidget(g2)
-
         # ── 扫描 ──
         g3 = QGroupBox("扫描设置")
         g3l = QFormLayout(g3)
