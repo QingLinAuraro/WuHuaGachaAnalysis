@@ -14,12 +14,7 @@ automation:
     template_threshold: 0.8
   templates_dir: assets/templates
 database:
-  host: localhost
-  port: 3306
-  user: QingLinAuraro
-  password: root
-  name: wuhuagacha
-  charset: utf8mb4
+  path: data/gacha.db
 emulator:
   adb_port:
     bluestacks: 5555

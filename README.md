@@ -10,7 +10,7 @@
 - 🛡️ **页指纹去重**：整页纠错后角色名做指纹，跨扫描精准去重，同十连同名角色不误判
 - 📊 **数据统计分析**：按卡池时间线展示特出记录、UP/歪统计、垫抽计数
 - 👥 **多账户支持**：可创建多个账户分别管理不同账号的抽卡记录
-- 💾 **MySQL 存储**：SQLAlchemy ORM，支持 JSON 导入/导出
+- 💾 **本地 SQLite 存储**：零配置，自动创建，SQLAlchemy ORM，支持 JSON 导入/导出
 
 ## 项目结构
 
@@ -37,7 +37,7 @@ WuHuaGachaAnalysis/
 │   ├── models/                     # 数据模型
 │   │   └── gacha_record.py         # 抽卡记录（5★特出/4★优异/3★新生）
 │   ├── storage/                    # 数据存储
-│   │   ├── database.py             # MySQL (SQLAlchemy ORM)
+│   │   ├── database.py             # SQLite (SQLAlchemy ORM，自动创建)
 │   │   └── exporter.py             # JSON 导出/导入
 │   └── gui/                        # 桌面 GUI (PyQt6)
 │       ├── main_window.py          # 主窗口（暗色主题 + 账户管理）
@@ -62,7 +62,6 @@ WuHuaGachaAnalysis/
 - Windows（推荐）/ macOS / Linux
 - ADB (Android Debug Bridge)
 - 模拟器（MuMu / 雷电 / 蓝叠）
-- MySQL 数据库
 
 ### 安装
 
@@ -79,18 +78,7 @@ source .venv/bin/activate  # Linux/macOS
 # 安装依赖
 pip install -r requirements.txt
 
-# 配置 MySQL（修改 config/default_config.yaml）
-#   database:
-#     host: localhost
-#     port: 3306
-#     user: root
-#     password: your_password
-#     name: wuhua_gacha
-
-# 创建数据库
-# mysql -u root -p -e "CREATE DATABASE wuhua_gacha CHARACTER SET utf8mb4"
-
-# 启动应用
+# 启动应用（数据库自动创建，无需配置）
 python -m src.main
 ```
 
@@ -109,5 +97,5 @@ python -m src.main
 | OCR | PaddleOCR（子进程批量处理） |
 | 图像识别 | OpenCV（模板匹配 + 颜色检测） |
 | 模拟器控制 | ADB (subprocess) |
-| 数据库 | MySQL + SQLAlchemy |
+| 数据库 | SQLite + SQLAlchemy（零配置） |
 | 日志 | loguru |

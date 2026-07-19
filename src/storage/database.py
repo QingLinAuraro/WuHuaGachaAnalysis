@@ -1,9 +1,10 @@
 """
 数据库操作模块
-使用 SQLAlchemy ORM 管理 MySQL 数据库
+使用 SQLAlchemy ORM 管理 SQLite 数据库
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import (
@@ -88,43 +89,31 @@ class GachaRecordORM(Base):
 # ── 数据库管理器 ──────────────────────────────────────
 
 class Database:
-    """MySQL 数据库管理器"""
+    """SQLite 数据库管理器"""
 
     DEFAULT_ACCOUNT_NAME = "默认"
 
-    def __init__(self) -> None:
-        host = config.get("database.host", "localhost")
-        port = config.get("database.port", 3306)
-        user = config.get("database.user", "root")
-        password = config.get("database.password", "")
-        db_name = config.get("database.name", "wuhua_gacha")
-        charset = config.get("database.charset", "utf8mb4")
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        db_path = db_path or config.get("database.path", "data/gacha.db")
+        db_dir = Path(db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
 
-        url = (f"mysql+pymysql://{user}:{password}@{host}:{port}/"
-               f"{db_name}?charset={charset}")
-        self._engine = create_engine(
-            url, echo=False,
-            pool_pre_ping=True,      # 自动检测断连
-            pool_recycle=3600,        # 每小时回收连接
-        )
+        self._engine = create_engine(f"sqlite:///{db_path}", echo=False)
         self._Session = sessionmaker(bind=self._engine, expire_on_commit=False)
 
         self._init_db()
 
     def _init_db(self) -> None:
         """创建表并确保默认账户存在"""
-        try:
-            Base.metadata.create_all(self._engine)
+        Base.metadata.create_all(self._engine)
 
-            with self.session as s:
-                default = s.query(AccountORM).filter_by(name=self.DEFAULT_ACCOUNT_NAME).first()
-                if default is None:
-                    default = AccountORM(name=self.DEFAULT_ACCOUNT_NAME)
-                    s.add(default)
-                    s.commit()
-                    logger.info("已创建默认账户")
-        except Exception as e:
-            logger.warning("数据库初始化失败 (MySQL 未连接?): {}", e)
+        with self.session as s:
+            default = s.query(AccountORM).filter_by(name=self.DEFAULT_ACCOUNT_NAME).first()
+            if default is None:
+                default = AccountORM(name=self.DEFAULT_ACCOUNT_NAME)
+                s.add(default)
+                s.commit()
+                logger.info("已创建默认账户")
 
     @property
     def session(self) -> Session:
