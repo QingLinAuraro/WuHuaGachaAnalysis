@@ -171,8 +171,9 @@ class GachaScanner:
         max_pn = max((r.pull_number for r in existing_records if r.pull_number > 0), default=0)
 
         logger.info("=" * 60)
-        logger.info("开始扫描 - 账户ID={} 卡池: {} (已有 {} 条)",
-                    self._current_account_id, self._current_banner_name,
+        logger.info("开始扫描 - 账户ID={} (current={}) 卡池: {} (已有 {} 条)",
+                    self._current_account_id, self._current_account_id,
+                    self._current_banner_name,
                     len(existing_ids))
         logger.info("=" * 60)
 
@@ -256,7 +257,7 @@ class GachaScanner:
                 if self._on_record_found:
                     self._on_record_found(record)
 
-            logger.info("第 {} 页: OCR {} 条, 新增 {}, 跳过 {}", page, len(page_records), page_new, page_skip)
+            logger.info("第 {} 页: OCR {} 条, 新增 {}, 跳过 {} (账户ID={})", page, len(page_records), page_new, page_skip, self._current_account_id)
 
             if not self._is_running:
                 logger.info("扫描已中断，共新增 {} 条", new_count)
