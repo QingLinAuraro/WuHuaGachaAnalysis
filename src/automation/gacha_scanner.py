@@ -164,7 +164,7 @@ class GachaScanner:
         self._screenshot.reset_counter()
         self._adb.reset_click_history()
 
-        # 加载DB已有 record_id 用于去重
+        # 加载当前账户已有 record_id 用于去重
         existing_records = db.get_all_records(account_id=self._current_account_id)
         existing_ids: set[str] = {r.record_id for r in existing_records}
 
@@ -236,6 +236,11 @@ class GachaScanner:
                 record.banner_type = page_type or self._current_banner_type
                 record.account_id = self._current_account_id
                 record.pull_date = record.pull_time.strftime("%m-%d")
+
+                # 用 页指纹+行号+账户ID 生成唯一 record_id
+                record.record_id = hashlib.md5(
+                    f"{record._page_fp}|{record._row}|{record.account_id}".encode()
+                ).hexdigest()[:12]
 
                 if record.record_id in existing_ids:
                     logger.debug("跳过重复: {} (ID={})", record.character_name, record.record_id[:8])
@@ -375,9 +380,8 @@ class GachaScanner:
                     )
 
             if record is not None:
-                record.record_id = hashlib.md5(
-                    f"{page_fingerprint}|{i}".encode()
-                ).hexdigest()[:12]
+                record._page_fp = page_fingerprint
+                record._row = i
                 record.text_hash = _compute_text_hash(ocr_results)
                 record.content_hash = _compute_content_hash(ocr_results, row_index=i)
                 records.append(record)

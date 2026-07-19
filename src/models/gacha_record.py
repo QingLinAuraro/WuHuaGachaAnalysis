@@ -42,6 +42,8 @@ class GachaRecord:
     pull_date: str = ""          # 出货日期 (月-日格式缓存，方便UI)
     content_hash: str = ""       # OCR 内容哈希（含行号，record_id用）
     text_hash: str = ""          # OCR 文本哈希（不含行号，跨扫描去重用）
+    _page_fp: str = ""           # 页指纹（内部，生成 record_id 用）
+    _row: int = 0                # 行号（内部）
 
     def __post_init__(self) -> None:
         if not self.record_id:
