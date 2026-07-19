@@ -3,7 +3,6 @@ adb:
   screenshot_dir: screenshots
   serial: auto
 automation:
-  coords_file: ''
   image_recognition:
     action_interval: 0.5
     color_tolerance: 10
@@ -12,27 +11,11 @@ automation:
     min_width: 640
     navigation_timeout: 30
     template_threshold: 0.8
-  templates_dir: assets/templates
 database:
   path: data/gacha.db
-emulator:
-  adb_port:
-    bluestacks: 5555
-    ldplayer: 5555
-    mumu: 16384
-  type: auto
 gacha:
-  record_height_max: 85
-  record_height_min: 45
   scan_page_delay: 2.0
-game:
-  package_name: com.cipaishe.wuhua.bilibili
 gui:
-  last_account_id: 3
-  theme: dark
+  last_account_id: 1
   window_height: 600
   window_width: 900
-ocr:
-  engine: paddleocr
-  lang: ch
-  use_gpu: false

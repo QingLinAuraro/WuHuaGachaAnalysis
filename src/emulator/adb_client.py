@@ -315,44 +315,17 @@ class ADBClient:
         """初始化点击历史（首次调用 click 时自动初始化）"""
         if not hasattr(self, "_click_history"):
             self._click_history: list[tuple[int, int, float]] = []
-            self._stuck_watch: dict = {
-                "button_name": "",
-                "start_time": 0.0,
-                "click_count": 0,
-            }
 
     def _record_click(self, x: int, y: int) -> None:
         """记录每次点击"""
         self._init_click_history()
         self._click_history.append((x, y, time.time()))
-        # 只保留最近 100 次
         if len(self._click_history) > 100:
             self._click_history = self._click_history[-100:]
-
-    def get_click_count(
-        self, button_name: str = "", window_seconds: float = 15.0
-    ) -> int:
-        """获取最近 window_seconds 秒内的点击次数
-
-        Args:
-            button_name: 按钮名（当前仅统计总数，后续可按名称过滤）
-            window_seconds: 时间窗口
-
-        Returns:
-            点击次数
-        """
-        self._init_click_history()
-        if not self._click_history:
-            return 0
-
-        now = time.time()
-        cutoff = now - window_seconds
-        return sum(1 for _, _, t in self._click_history if t >= cutoff)
 
     def reset_click_history(self) -> None:
         """重置点击历史"""
         self._click_history = []
-        self._stuck_watch = {"button_name": "", "start_time": 0.0, "click_count": 0}
 
 
 # ── 设备自动检测 ──────────────────────────────────────

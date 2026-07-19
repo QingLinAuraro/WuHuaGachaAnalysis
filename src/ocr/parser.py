@@ -38,12 +38,6 @@ class GachaRecordParser:
         re.compile(r"(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(:\d{2})?)"),
     ]
 
-    # 稀有度关键词
-    RARITY_KEYWORDS = {
-        "特出": Rarity.SPECIAL,
-        "优异": Rarity.EXCELLENT,
-        "新生": Rarity.FINE,
-    }
 
     def __init__(self, banner_name: str = "") -> None:
         self.banner_name = banner_name
@@ -58,11 +52,6 @@ class GachaRecordParser:
         """设置当前扫描的卡池信息"""
         self.banner_name = name
         self.banner_type = banner_type
-
-    def is_up_character(self, banner_name: str, character_name: str) -> bool:
-        """判断角色是否为指定卡池的 UP 角色（用于歪不歪统计）"""
-        up = self._banner_up.get(banner_name, "")
-        return bool(up) and up == character_name
 
     def lookup_rarity(self, character_name: str) -> Optional[Rarity]:
         """从词库查找器者稀有度（已纠错后的名称）"""
@@ -144,53 +133,7 @@ class GachaRecordParser:
             return best_match
         return None
 
-    def parse_record_from_texts(
-        self,
-        texts: list[str],
-        pull_number: int = 0,
-    ) -> Optional[GachaRecord]:
-        """
-        从一组 OCR 识别文本中解析出一条抽卡记录（旧版兼容接口）
-
-        Args:
-            texts: OCR 识别出的所有文本行
-            pull_number: 在该卡池中的序号
-
-        Returns:
-            GachaRecord 或 None（解析失败）
-        """
-        # 合并所有文本
-        full_text = " ".join(texts)
-
-        character_name = self._extract_character_name(texts)
-        rarity = self._extract_rarity(texts)
-        pull_time = self._extract_time(full_text)
-
-        # 提取卡池名称（召集列：限时/卡池名 或 限定/卡池名）
-        banner_from_ocr = self._extract_banner(texts)
-        if banner_from_ocr:
-            self.banner_name = banner_from_ocr
-            self.banner_type = BannerType.EVENT  # 限时/限定都属于活动卡池
-
-        if not character_name or rarity is None:
-            logger.debug("解析失败 - 文本: {}", texts)
-            return None
-
-        # 如果没有识别到时间，使用当前时间
-        if pull_time is None:
-            pull_time = datetime.now()
-            logger.debug("未识别到时间信息，使用当前时间")
-
-        return GachaRecord(
-            character_name=character_name,
-            rarity=rarity,
-            pull_time=pull_time,
-            banner_name=self.banner_name,
-            banner_type=self.banner_type,
-            pull_number=pull_number,
-        )
-
-    # ── 基于列位置的解析（推荐） ──────────────────────
+    # ── 基于列位置的解析 ──────────────────────
 
     # 三列在截图中的 x 比例范围（已裁剪稀有度列 x<420）
     # 新坐标系：原图 x-420，宽度=860
@@ -274,92 +217,6 @@ class GachaRecordParser:
             banner_type=self.banner_type,
             pull_number=pull_number,
         )
-
-    def parse_records_batch(
-        self,
-        all_texts: list[list[str]],
-    ) -> list[GachaRecord]:
-        """
-        批量解析多条记录
-
-        Args:
-            all_texts: 每组是一条记录的文本列表
-
-        Returns:
-            解析成功的 GachaRecord 列表
-        """
-        records = []
-        for i, texts in enumerate(all_texts):
-            record = self.parse_record_from_texts(texts, pull_number=i + 1)
-            if record:
-                records.append(record)
-        logger.info("批量解析完成: {} 条成功 / {} 条输入", len(records), len(all_texts))
-        return records
-
-    def _extract_character_name(self, texts: list[str]) -> Optional[str]:
-        """
-        从文本行中提取器者名称
-
-        物华弥新召集记录为四列表格：稀有度 | 器者 | 召集 | 时间
-        OCR 识别的文本通常按从左到右、从上到下排列
-        如果有4条文本，第2条（索引1）就是器者名称
-        """
-        # 策略1：恰好4条文本 — 按表格列顺序，取第2列
-        if len(texts) == 4:
-            name = texts[1].strip()
-            # 过滤掉明显不是名称的内容
-            if len(name) >= 1 and not re.match(r"^\d+$", name):
-                return name
-
-        # 策略2：从所有文本中找最长且合理的名称
-        best_name = ""
-        best_len = 0
-        for text in texts:
-            cleaned = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9·]", "", text.strip())
-            if len(cleaned) >= 2 and len(cleaned) > best_len:
-                if not re.match(r"^\d{2,}$", cleaned):
-                    if not re.match(r"\d{4}[-/年]", cleaned):
-                        # 排除稀有度关键词
-                        if cleaned not in ("特出", "优异", "新生"):
-                            best_name = cleaned
-                            best_len = len(cleaned)
-
-        return best_name if best_name else None
-
-    def _extract_rarity(self, texts: list[str]) -> Optional[Rarity]:
-        """从文本中提取稀有度信息"""
-        full = " ".join(texts)
-        for keyword, rarity in self.RARITY_KEYWORDS.items():
-            if keyword in full:
-                return rarity
-        return None
-
-    def _extract_rarity_from_text(self, text: str) -> Optional[Rarity]:
-        """从单列合并文本中提取稀有度"""
-        text = text.strip()
-        for keyword, rarity in self.RARITY_KEYWORDS.items():
-            if keyword in text:
-                return rarity
-        return None
-
-    def _extract_banner(self, texts: list[str]) -> Optional[str]:
-        """
-        从文本中提取卡池名称
-        物华弥新格式：召集列为 "限时/卡池名" 或 "限定/卡池名"
-        """
-        for text in texts:
-            text = text.strip()
-            # 匹配 "限时/XXX" 或 "限定/XXX" 格式
-            if "/" in text and len(text) >= 3:
-                # 取 "/" 后的卡池名称
-                parts = text.split("/", 1)
-                if len(parts) == 2 and parts[1]:
-                    return parts[1].strip()
-                return text.strip()
-            # 直接匹配 "限时" 或 "限定" 开头
-            if text.startswith(("限时", "限定")) and len(text) > 2:
-                return text[2:].strip()
-        return None
 
     def _extract_banner_from_text(self, text: str) -> tuple:
         """从卡池列合并文本中提取 (卡池名称, 池类型)

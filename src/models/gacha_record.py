@@ -13,8 +13,6 @@ class Rarity(IntEnum):
     SPECIAL = 5   # 特出（红卡 / 5★）
     EXCELLENT = 4 # 优异（黄卡 / 4★）
     FINE = 3      # 新生（蓝卡 / 3★）
-    COMMON = 2    # 普通
-    BASIC = 1     # 基础
 
 
 class BannerType(str):
@@ -22,8 +20,6 @@ class BannerType(str):
     EVENT = "event"
     LIMITED_TIME = "限时"
     LIMITED = "限定"
-    STANDARD = "standard"
-    NEWBIE = "newbie"
     UNKNOWN = "unknown"
 
 

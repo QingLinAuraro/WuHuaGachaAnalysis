@@ -14,10 +14,8 @@ UI 导航器（重写版）
   - set_coords() / reload_coords() → 坐标 fallback（保留兼容）
 """
 
-import json
 import time
 from enum import Enum, auto
-from pathlib import Path
 from typing import Optional, Callable
 
 import numpy as np
@@ -37,13 +35,6 @@ from src.automation.errors import (
     NavigationError,
     GameStuckError,
 )
-
-# YAML 为可选依赖
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
 
 
 class NavState(Enum):
@@ -92,7 +83,6 @@ class UINavigator:
         detector: PageDetector,
         width: int = 1280,
         height: int = 720,
-        coord_config_path: Optional[str] = None,
     ) -> None:
         self._adb = adb
         self._screenshot = screenshot
@@ -100,17 +90,7 @@ class UINavigator:
         self._width = width
         self._height = height
         self._state = NavState.IDLE
-
-        # 坐标 fallback
-        if coord_config_path:
-            loaded = self._load_coords_from_file(coord_config_path)
-            if loaded:
-                self._coords = loaded
-                logger.info("坐标配置已从文件加载: {}", coord_config_path)
-            else:
-                self._coords = self._get_coords()
-        else:
-            self._coords = self._get_coords()
+        self._coords = self._get_coords()
 
         # 构建页面图
         self._page_graph = PageGraph()
@@ -157,47 +137,6 @@ class UINavigator:
             return dict(self.COORDS_1920x1080)
         return dict(self.COORDS_1280x720)
 
-    def _load_coords_from_file(self, path: str) -> Optional[dict]:
-        """从 YAML 或 JSON 文件加载坐标配置"""
-        file_path = Path(path)
-        if not file_path.exists():
-            logger.warning("坐标配置文件不存在: {}", path)
-            return None
-
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                ext = file_path.suffix.lower()
-                if ext in (".yaml", ".yml"):
-                    if not HAS_YAML:
-                        logger.error("需要安装 PyYAML: pip install pyyaml")
-                        return None
-                    data = yaml.safe_load(f)
-                elif ext == ".json":
-                    data = json.load(f)
-                else:
-                    return None
-
-            if "coords" in data:
-                raw = data["coords"]
-            else:
-                raw = {k: v for k, v in data.items()
-                       if isinstance(v, dict) and "x" in v and "y" in v}
-
-            if not raw:
-                return None
-
-            coords = {}
-            for key, val in raw.items():
-                if isinstance(val, dict) and "x" in val and "y" in val:
-                    coords[key] = (int(val["x"]), int(val["y"]))
-                elif isinstance(val, (list, tuple)) and len(val) == 2:
-                    coords[key] = (int(val[0]), int(val[1]))
-
-            return coords
-        except Exception as e:
-            logger.error("加载坐标配置文件失败: {}", e)
-            return None
-
     def _coord(self, key: str) -> tuple[int, int]:
         """获取坐标，已按分辨率缩放"""
         base_w, base_h = 1280, 720
@@ -206,25 +145,6 @@ class UINavigator:
             x = int(x * self._width / base_w)
             y = int(y * self._height / base_h)
         return x, y
-
-    def set_coords(self, coords: dict) -> None:
-        """运行时设置坐标"""
-        self._coords.update({
-            k: (int(v[0]), int(v[1])) if isinstance(v, (list, tuple)) else v
-            for k, v in coords.items()
-        })
-
-    def reload_coords(self, path: str) -> bool:
-        """重新加载坐标配置文件"""
-        loaded = self._load_coords_from_file(path)
-        if loaded:
-            self._coords = loaded
-            return True
-        return False
-
-    def get_all_coords(self) -> dict:
-        """获取当前所有坐标"""
-        return dict(self._coords)
 
     # ── 状态管理 ──────────────────────────────────────
 

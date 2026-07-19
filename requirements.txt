@@ -1,5 +1,5 @@
 # WuHuaGachaAnalysis - Dependencies
-# Python 3.11 (推荐，兼容性最佳)
+# Python 3.11
 # =====================================
 # 国内用户建议使用百度镜像加速:
 #   pip install -r requirements.txt -i https://mirror.baidu.com/pypi/simple
@@ -7,7 +7,6 @@
 
 # GUI Framework
 PyQt6>=6.5.0,<7.0.0
-PyQt6-WebEngine>=6.5.0,<7.0.0
 
 # OCR Engine
 paddlepaddle>=2.6.0,<3.0.0
@@ -18,27 +17,9 @@ opencv-python>=4.8.0,<5.0.0
 Pillow>=10.0.0,<12.0.0
 numpy>=1.24.0
 
-# ADB 控制 — 本项目通过 subprocess 直接调用 adb 命令行，无需额外 Python ADB 库
-
 # Data & Config
 pyyaml>=6.0,<7.0.0
 sqlalchemy>=2.0.0,<3.0.0
 
-# Charts (WebView rendering)
-pyecharts>=2.0.0,<3.0.0
-
-# Backend API (Phase 2)
-fastapi>=0.100.0,<1.0.0
-uvicorn>=0.23.0,<1.0.0
-python-jose[cryptography]>=3.3.0,<4.0.0
-passlib[bcrypt]>=1.7.4,<2.0.0
-
-# HTTP Client
-httpx>=0.24.0,<1.0.0
-
 # Logging
 loguru>=0.7.0,<1.0.0
-
-# Testing
-pytest>=7.4.0,<9.0.0
-pytest-cov>=4.1.0,<6.0.0

@@ -77,11 +77,6 @@ class SettingsPage(QWidget):
         g3 = QGroupBox("扫描设置")
         g3l = QFormLayout(g3)
         g3l.setSpacing(8)
-        self._delay = QSpinBox()
-        self._delay.setRange(1, 30)
-        self._delay.setValue(5)
-        self._delay.setSuffix(" ×0.1秒")
-        g3l.addRow("翻页延迟:", self._delay)
         l.addWidget(g3)
         l.addStretch()
 

@@ -74,12 +74,10 @@ class GachaScanner:
         self._screenshot = screenshot
         self._detector = detector
 
-        coord_cfg = config.get("automation.coords_file", "")
         self._navigator = UINavigator(
             adb, screenshot, detector,
             width=adb.get_screen_size()[0],
             height=adb.get_screen_size()[1],
-            coord_config_path=coord_cfg if coord_cfg else None,
         )
 
         self._ocr = get_ocr_engine()
