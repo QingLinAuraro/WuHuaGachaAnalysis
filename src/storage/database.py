@@ -115,6 +115,17 @@ class Database:
                 s.commit()
                 logger.info("已创建默认账户")
 
+            # 修复旧记录 account_id 为 NULL 的情况
+            nulls = s.query(GachaRecordORM).filter(
+                GachaRecordORM.account_id == None
+            ).count()
+            if nulls > 0:
+                s.query(GachaRecordORM).filter(
+                    GachaRecordORM.account_id == None
+                ).update({"account_id": default.id})
+                s.commit()
+                logger.info("已将 {} 条旧记录迁移到默认账户", nulls)
+
     @property
     def session(self) -> Session:
         return self._Session()

@@ -492,7 +492,7 @@ class MainWindow(QMainWindow):
             return
         self._current_account_id = self._account_combo.currentData()
         config.set("gui.last_account_id", self._current_account_id)
-        self.log_msg(f"[INFO] 切换到账户: {self._account_combo.currentText()}")
+        self.log_msg(f"[INFO] 切换到账户: {self._account_combo.currentText()} (ID={self._current_account_id})")
         self.refresh_all_pages()
 
     def _on_manage_accounts(self) -> None:
