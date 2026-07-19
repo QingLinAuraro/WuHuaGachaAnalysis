@@ -231,6 +231,7 @@ data/
 
 # Tools (dev only)
 tools/
+tests/
 
 # Export files
 gacha_export*.json
