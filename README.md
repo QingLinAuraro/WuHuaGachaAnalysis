@@ -5,11 +5,12 @@
 ## 功能
 
 - 🖥️ **PC端自动化扫描**：通过 ADB 连接模拟器，图像识别自动导航至"召集记录"，逐页截图并 OCR 识别
-- 🧭 **图像识别导航**：基于模板匹配 + 颜色检测 + A* BFS 最短路径的智能页面导航（参照 ALAS 设计）
+- 🧭 **图像识别导航**：基于模板匹配 + A* BFS 最短路径的智能页面导航（参照 ALAS 设计）
+- 🔍 **PaddleOCR 识别**：子进程批量处理，按列位置解析角色名/卡池/时间，稀有度从词库直接匹配
+- 🛡️ **页指纹去重**：整页纠错后角色名做指纹，跨扫描精准去重，同十连同名角色不误判
 - 📊 **数据统计分析**：按卡池时间线展示特出记录、UP/歪统计、垫抽计数
-- 💾 **数据管理**：SQLite 本地存储（自动去重），支持 JSON 导入/导出
-- 🎨 **可视化图表**：pyecharts 图表展示（远期完善）
-- 🔮 **远期规划**：微信小程序数据展示、手机端悬浮窗采集
+- 👥 **多账户支持**：可创建多个账户分别管理不同账号的抽卡记录
+- 💾 **MySQL 存储**：SQLAlchemy ORM，支持 JSON 导入/导出
 
 ## 项目结构
 
@@ -26,43 +27,30 @@ WuHuaGachaAnalysis/
 │   │   ├── page_graph.py           # 页面图导航系统（A* BFS 最短路径）
 │   │   ├── page_detector.py        # 页面识别 + 颜色匹配稀有度
 │   │   ├── ui_navigator.py         # 导航器（图像识别优先 + 坐标回退）
-│   │   ├── gacha_scanner.py        # 召集记录扫描主逻辑
+│   │   ├── gacha_scanner.py        # 召集记录扫描主逻辑 + 页指纹去重
 │   │   ├── errors.py               # 自动化异常类
 │   │   └── pages/                  # 各页面按钮定义
-│   │       ├── main.py             #   主界面
-│   │       ├── gacha_home.py       #   招集主页
-│   │       ├── gacha_details.py    #   概率详情页
-│   │       └── gacha_record.py     #   召集记录页
 │   ├── ocr/                        # OCR 识别
-│   │   ├── engine.py               # EasyOCR 子进程封装
+│   │   ├── engine.py               # PaddleOCR 子进程封装
 │   │   ├── worker.py               # OCR 子进程脚本
 │   │   └── parser.py               # 结果解析（按列位置 + 模糊匹配纠错）
 │   ├── models/                     # 数据模型
-│   │   └── gacha_record.py         # 抽卡记录（5★特出/4★优异/3★新生...）
+│   │   └── gacha_record.py         # 抽卡记录（5★特出/4★优异/3★新生）
 │   ├── storage/                    # 数据存储
-│   │   ├── database.py             # SQLite (SQLAlchemy ORM)
+│   │   ├── database.py             # MySQL (SQLAlchemy ORM)
 │   │   └── exporter.py             # JSON 导出/导入
 │   └── gui/                        # 桌面 GUI (PyQt6)
-│       ├── main_window.py          # 主窗口（暗色主题）
-│       └── pages/                  # 各页面
-│           ├── home_page.py        # 首页概览（卡池时间线）
-│           └── settings_page.py    # 设置页（模拟器/OCR/扫描）
+│       ├── main_window.py          # 主窗口（暗色主题 + 账户管理）
+│       └── pages/
+│           ├── home_page.py        # 首页概览（卡池时间线 + 垫抽）
+│           └── settings_page.py    # 设置页（ADB 连接/扫描）
 ├── assets/
-│   ├── templates/                  # UI 模板图片（页面识别用）
-│   │   ├── main/                   #   主界面模板
-│   │   ├── gacha/                  #   招集页模板
-│   │   ├── gacha/details/          #   详情页模板
-│   │   ├── gacha/details/record/   #   记录页模板（翻页/选择等）
-│   │   └── shared/                 #   通用模板
-│   ├── icons/                      # 图标
-│   └── styles/                     # 样式
+│   └── templates/                  # UI 模板图片（页面识别用）
 ├── config/
-│   ├── default_config.yaml         # 默认配置（ADB/OCR/扫描参数）
-│   └── names.yaml                  # 器者名称 + 卡池 UP 词库
-├── tools/
-│   └── coordinate_viewer.py        # 坐标标记查看工具
-├── tests/
+│   ├── default_config.yaml         # 默认配置（ADB/OCR/MySQL/扫描参数）
+│   └── names.yaml                  # 器者名称词库 + 卡池 UP 映射
 ├── requirements.txt
+├── LICENSE
 └── README.md
 ```
 
@@ -70,10 +58,11 @@ WuHuaGachaAnalysis/
 
 ### 环境要求
 
-- Python 3.10+
-- Windows / macOS / Linux
+- Python 3.11
+- Windows（推荐）/ macOS / Linux
 - ADB (Android Debug Bridge)
 - 模拟器（MuMu / 雷电 / 蓝叠）
+- MySQL 数据库
 
 ### 安装
 
@@ -90,27 +79,35 @@ source .venv/bin/activate  # Linux/macOS
 # 安装依赖
 pip install -r requirements.txt
 
+# 配置 MySQL（修改 config/default_config.yaml）
+#   database:
+#     host: localhost
+#     port: 3306
+#     user: root
+#     password: your_password
+#     name: wuhua_gacha
+
+# 创建数据库
+# mysql -u root -p -e "CREATE DATABASE wuhua_gacha CHARACTER SET utf8mb4"
+
 # 启动应用
 python -m src.main
 ```
 
 ### 使用说明
 
-1. 在模拟器中打开《物华弥新》
-2. 启动本程序，进入"设置"页面连接模拟器
-3. 点击"开始扫描"，程序将自动导航到召集记录并逐页识别
-4. 在"首页概览"查看按卡池分组的时间线和 UP/歪统计
+1. 模拟器打开《物华弥新》，进入主界面
+2. 启动程序，在"设置"页面连接模拟器
+3. 点击"开始扫描"，程序自动导航并识别全部召集记录
+4. 在"首页概览"查看按卡池分组的时间线和统计
 
 ## 技术栈
 
 | 模块 | 技术 |
 |------|------|
 | GUI | PyQt6 |
-| OCR | EasyOCR（子进程批量处理） |
+| OCR | PaddleOCR（子进程批量处理） |
 | 图像识别 | OpenCV（模板匹配 + 颜色检测） |
 | 模拟器控制 | ADB (subprocess) |
-| 数据库 | SQLite + SQLAlchemy |
-| 图表 | pyecharts (ECharts) |
+| 数据库 | MySQL + SQLAlchemy |
 | 日志 | loguru |
-| 后端 (远期) | FastAPI |
-| 小程序 (远期) | uni-app (Vue3) |
