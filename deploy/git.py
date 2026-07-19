@@ -4,6 +4,7 @@ Git 更新逻辑
 import os
 
 from deploy.config import DeployConfig
+from deploy.utils import cached_property
 
 
 class GitManager(DeployConfig):
@@ -68,9 +69,13 @@ class GitManager(DeployConfig):
         ):
             self.execute(f'"{self.git}" remote add origin {repo}')
 
-        # fetch
+        # fetch（首次运行或离线时允许失败，跳过更新）
         print("\n--- Git Fetch ---")
-        self.execute(f'"{self.git}" fetch origin {branch}')
+        if not self.execute(
+            f'"{self.git}" fetch origin {branch}', allow_failure=True
+        ):
+            print("  无法连接到远程仓库，跳过更新（首次运行或离线状态）")
+            return
 
         # pull
         print("\n--- Git Pull ---")
