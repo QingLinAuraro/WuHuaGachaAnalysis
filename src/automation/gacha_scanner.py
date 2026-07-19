@@ -401,7 +401,7 @@ class GachaScanner:
         before_area = self._extract_record_area(before_img)
         click_pos = self._find_prev_button(before_img)
         self._adb.click(*click_pos)
-        time.sleep(0.6)
+        time.sleep(1.0)
         after_img = self._capture_screenshot()
         if after_img is None:
             return False
@@ -423,8 +423,11 @@ class GachaScanner:
             match_result = self._prev_page_btn.match(img)
             if match_result:
                 x, y, btn_w, btn_h, score = match_result
+                logger.debug("上一页按钮 @ ({},{}) score={:.2f}", x+btn_w//2, y+btn_h//2, score)
                 return (x + btn_w // 2, y + btn_h // 2)
-        return self._navigator._coord("record_list_start")
+            else:
+                logger.debug("上一页按钮匹配失败(score={:.3f})，用区域中心", self._prev_page_btn._match_score)
+        return self._prev_page_btn.button_center()
 
     @staticmethod
     def _content_changed(before: np.ndarray, after: np.ndarray) -> bool:
