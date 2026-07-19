@@ -222,10 +222,12 @@ class GachaScanner:
                 logger.error("第 {} 页 OCR 异常: {}", page, e)
                 page_records = []
 
-            logger.info("第 {} 页: OCR {} 条", page, len(page_records))
+            logger.info("第 {} 页: OCR {} 条, 新增 {}, 跳过 {}", page, len(page_records), page_new, page_skip)
 
             page_banner = None
             page_type = None
+            page_new = 0
+            page_skip = 0
             for record in page_records:
                 if not self._is_running:
                     break
@@ -241,9 +243,11 @@ class GachaScanner:
 
                 if record.record_id in existing_ids:
                     logger.debug("跳过重复: {} (ID={})", record.character_name, record.record_id[:8])
+                    page_skip += 1
                     continue
 
                 existing_ids.add(record.record_id)
+                page_new += 1
                 max_pn += 1
                 record.pull_number = max_pn
                 new_pns.append(max_pn)
@@ -252,8 +256,8 @@ class GachaScanner:
                 try:
                     db.add_record(record)
                     new_count += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("入库失败: {} - {}", record.character_name, e)
                 if self._on_record_found:
                     self._on_record_found(record)
 
