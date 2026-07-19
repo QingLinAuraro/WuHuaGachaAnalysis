@@ -15,16 +15,14 @@
 
 ## 🚀 快速开始（无需编程基础）
 
-> 适用人群：不会 Python、不想装环境、只想双击运行的用户。
-
 1. 前往 [Releases](https://github.com/QingLinAuraro/WuHuaGachaAnalysis/releases) 页面
 2. 下载最新的 `WuHuaGachaAnalysis-便携版-*.zip`
-3. 解压到任意目录（**请勿放在中文路径过深的位置**）
+3. 解压到任意目录
 4. 双击 `物华弥新抽卡分析器.exe`
 5. 程序自动检查更新 → 安装依赖 → 启动 GUI
 6. 之后每次打开都会自动拉取最新版本
 
-> 💡 首次启动可能需要 10-30 秒初始化，请耐心等待。
+> 💡 首次启动可能需要 10-30 秒初始化，请耐心等待。离线也能正常使用。
 
 ### 使用说明
 
@@ -35,22 +33,17 @@
 
 ---
 
-## 🛠 开发者安装（有编程基础）
+## 🛠 开发者安装
 
 ```bash
-# 克隆仓库
 git clone https://github.com/QingLinAuraro/WuHuaGachaAnalysis.git
 cd WuHuaGachaAnalysis
 
-# 创建虚拟环境（推荐）
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-source .venv/bin/activate  # Linux/macOS
+source .venv/bin/activate      # Linux/macOS
+# .venv\Scripts\activate       # Windows
 
-# 安装依赖
 pip install -r requirements.txt
-
-# 启动应用
 python -m src.main
 ```
 
@@ -62,73 +55,69 @@ python -m src.main
 
 ### 前置要求
 
-- Python 3.11+（系统安装）
-- PyInstaller（`pip install pyinstaller`）
-- 网络连接（首次构建需下载约 150MB）
+- Python 3.11+
+- PyInstaller：`pip install pyinstaller`
+- 网络连接（首次构建需下载嵌入式 Python + MinGit + ADB 约 150MB）
 
 ### 一键构建
 
 ```bash
-# 仅本地构建（产出 build/ 目录 + .zip）
-python build_portable.py
-
-# 构建 + 自动推送到 GitHub release 分支
-python build_portable.py --push
+python build_portable.py                 # 完整构建
+python build_portable.py --skip-download # 跳过下载（toolkit/ 已就绪）
 ```
 
 ### 构建流程
 
 | 步骤 | 说明 |
 |------|------|
-| 下载嵌入式 Python 3.11 | 自包含运行时，无需用户安装 Python |
-| pip install 依赖 | PyQt6 + PaddleOCR + OpenCV 等全部打包 |
-| 下载 MinGit | 内嵌 Git，用于自更新 |
+| 下载嵌入式 Python 3.11 | 自包含运行时，用户无需安装 Python |
+| pip install 依赖 | PyQt6 + PaddleOCR + OpenCV 等全部打入 toolkit/ |
+| 下载 MinGit | 内嵌 Git，用于用户端自更新 |
 | 下载 ADB | 模拟器通信工具 |
-| 复制源码 | src/ config/ assets/ deploy/ |
-| 编译 .exe | PyInstaller 将 launcher.py 打包 |
-| 打包 .zip | ~400MB 分发包 |
-| Git 推送 | 推送到 `release` 分支 |
+| 编译 .exe | PyInstaller 将 launcher.py 打包为独立 exe |
+| 打包 .zip | 从外层源码 + build/产物 拼合分发包 |
 
-### 命令行参数
-
-```
-python build_portable.py [选项]
-
-选项:
-  --push              构建后自动推送到 Git 远程仓库
-  --remote URL        Git 远程仓库地址（默认: 本仓库）
-  --branch BRANCH     推送目标分支（默认: release）
-  --skip-download     跳过运行时下载（toolkit/ 已就绪时使用）
-```
-
-### 产物
+### 产物（build/ 目录仅 3 项）
 
 ```
 build/
-├── 物华弥新抽卡分析器.exe           # 启动器 (~9MB)
-├── WuHuaGachaAnalysis-便携版-*.zip  # 分发包 (~400MB)
 ├── toolkit/                         # Python + Git + ADB + 所有依赖
-├── src/ config/ assets/ deploy/     # 源码
-└── .git/                            # 追踪源码，推送至 release 分支
+├── 物华弥新抽卡分析器.exe           # 启动器 (~9MB)
+└── WuHuaGachaAnalysis-便携版-*.zip  # 分发包 (~400MB)
+```
+
+> 源码（src/ deploy/ config/ ...）不需要复制到 build/，打包时直接从项目根读取。
+
+### 发布
+
+```bash
+# 1. 推送源码更新
+git add -A && git commit -m "xxx" && git push
+
+# 2. 本地构建
+python build_portable.py --skip-download
+
+# 3. 前往 GitHub Releases 上传 build/ 中的 .zip
 ```
 
 ---
 
 ## 🔄 自更新机制
 
-便携版 `.exe` 内置自动更新：
+便携版 `.exe` 启动流程：
 
 ```
 用户双击 .exe
   → deploy/installer.py
-    → git fetch origin release    # 拉取最新源码
-    → pip install -r requirements # 增量安装依赖
+    → git init（首次）→ git fetch origin master
+    → git reset --hard origin/master    # 拉取最新源码
+    → pip install -r requirements.txt   # 增量安装依赖
   → 启动 src.main (GUI)
 ```
 
 - 有网络时自动更新到最新版本
-- **离线/首次运行时自动跳过更新**，不影响正常使用
-- 更新配置位于 `config/deploy.yaml`（首次运行时从 `deploy/template` 自动生成）
+- **离线/首次运行自动跳过更新**，不影响使用
+- 更新配置：`config/deploy.yaml`（首次运行时从 `deploy/template` 自动生成）
 
 ---
 
@@ -138,56 +127,33 @@ build/
 WuHuaGachaAnalysis/
 ├── src/                           # 源码
 │   ├── main.py                    # 程序入口
-│   ├── config.py                  # 配置管理（单例）
-│   ├── emulator/                  # 模拟器控制
-│   │   ├── adb_client.py          # ADB 连接、截图、点击
-│   │   └── screenshot.py          # 截图模块（PIL + numpy）
-│   ├── automation/                # 自动化引擎
-│   │   ├── button.py              # 多层级按钮识别
-│   │   ├── page_graph.py          # A* BFS 页面图导航
-│   │   ├── page_detector.py       # 页面识别 + 颜色匹配
-│   │   ├── ui_navigator.py        # 导航器
-│   │   ├── gacha_scanner.py       # 扫描主逻辑 + 页指纹去重
-│   │   ├── errors.py              # 自动化异常类
-│   │   └── pages/                 # 各页面按钮定义
-│   ├── ocr/                       # OCR 识别
-│   │   ├── engine.py              # PaddleOCR 子进程封装
-│   │   ├── worker.py              # OCR 子进程脚本
-│   │   └── parser.py              # 结果解析 + 模糊匹配纠错
+│   ├── config.py                  # 配置管理
+│   ├── emulator/                  # 模拟器控制 (ADB)
+│   ├── automation/                # 自动化引擎 (页面导航/扫描)
+│   ├── ocr/                       # OCR 识别 (PaddleOCR)
 │   ├── models/                    # 数据模型
-│   │   └── gacha_record.py        # 抽卡记录
-│   ├── storage/                   # 数据存储
-│   │   ├── database.py            # SQLite (SQLAlchemy ORM)
-│   │   └── exporter.py            # JSON 导出/导入
+│   ├── storage/                   # SQLite 存储 + JSON 导出
 │   └── gui/                       # 桌面 GUI (PyQt6)
-│       ├── main_window.py         # 主窗口（暗色主题 + 账户管理）
-│       └── pages/
-│           ├── home_page.py       # 首页概览
-│           └── settings_page.py   # 设置页
 ├── deploy/                        # 自更新模块
 │   ├── installer.py               # 更新器入口
-│   ├── git.py                     # Git 拉取逻辑
+│   ├── git.py                     # Git 拉取
 │   ├── pip.py                     # 依赖管理
-│   ├── config.py                  # 部署配置
-│   ├── utils.py                   # 工具函数
 │   └── template                   # 配置模板
-├── config/
-│   ├── default_config.yaml        # 默认配置
-│   └── names.yaml                 # 器者名称词库 + 卡池映射
+├── config/                        # 应用配置
+│   ├── default_config.yaml
+│   └── names.yaml                 # 器者名称词库
 ├── assets/templates/              # UI 模板图片
 ├── launcher.py                    # 启动器（编译为 .exe）
-├── build_portable.py              # 一键构建脚本
 ├── requirements.txt
-├── LICENSE
-└── README.md
+├── .gitignore
+├── 控制台.bat                     # 调试控制台
+├── README.md
+└── LICENSE
 ```
 
-## 仓库分支说明
+> 以下文件仅保留本地，不上传 Git：`build_portable.py`（构建脚本）、`tools/`（开发工具）、`build/`（构建产物）
 
-| 分支 | 用途 |
-|------|------|
-| `master` | 完整源码（开发者使用） |
-| `release` | 发布版文件（供便携版 .exe 自动更新拉取） |
+---
 
 ## 鸣谢
 
