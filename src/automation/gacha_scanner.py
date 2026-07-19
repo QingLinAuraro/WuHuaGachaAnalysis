@@ -227,9 +227,6 @@ class GachaScanner:
             page_new = 0
             page_skip = 0
             for record in page_records:
-                if not self._is_running:
-                    break
-
                 if page_banner is None and self._parser.banner_name and self._parser.banner_name != self._current_banner_name:
                     page_banner = self._parser.banner_name
                     page_type = self._parser.banner_type
