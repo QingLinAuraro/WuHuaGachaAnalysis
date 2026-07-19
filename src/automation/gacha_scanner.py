@@ -351,7 +351,7 @@ class GachaScanner:
         page_fingerprint = hashlib.md5(
             "|".join(page_names).encode()
         ).hexdigest()[:12]
-        logger.debug("页指纹: {} → 角色: {}", page_fingerprint, page_names[:3])
+        logger.debug("页指纹: {} → 角色[前3]: {}", page_fingerprint, page_names[:3])
 
         # 逐行生成记录
         for i in range(9, -1, -1):
@@ -367,7 +367,6 @@ class GachaScanner:
                 name = self._extract_name_from_ocr(ocr_results)
                 if name:
                     rarity = self._parser.lookup_rarity(name)
-                    # 尝试从 OCR 中提取时间，失败再用当前时间
                     time_text = " ".join(r["text"] for r in ocr_results if r.get("text"))
                     pull_time = self._parser._extract_time(time_text) or datetime.now()
                     record = GachaRecord(
@@ -378,7 +377,6 @@ class GachaScanner:
                     )
 
             if record is not None:
-                # record_id = 页指纹 + 行号，同页同位置必然相同
                 record.record_id = hashlib.md5(
                     f"{page_fingerprint}|{i}".encode()
                 ).hexdigest()[:12]
@@ -386,6 +384,7 @@ class GachaScanner:
                 record.content_hash = _compute_content_hash(ocr_results, row_index=i)
                 records.append(record)
 
+        logger.debug("页扫描完成: {} 条有效记录", len(records))
         return records
 
     # ── 截图 ────────────────────────────────────────────
