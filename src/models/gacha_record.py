@@ -65,12 +65,13 @@ class GachaRecord:
         }
 
     def to_dict_full(self) -> dict:
-        """完整导出（调试用）"""
+        """完整导出"""
         return {
             "record_id": self.record_id,
             "character_name": self.character_name,
             "rarity": self.rarity.value,
             "rarity_name": self.rarity.name,
+            "pull_date": self.pull_date,
             "pull_time": self.pull_time.isoformat(),
             "banner_name": self.banner_name,
             "banner_type": self.banner_type,
