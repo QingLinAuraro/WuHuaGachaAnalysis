@@ -222,8 +222,6 @@ class GachaScanner:
                 logger.error("第 {} 页 OCR 异常: {}", page, e)
                 page_records = []
 
-            logger.info("第 {} 页: OCR {} 条, 新增 {}, 跳过 {}", page, len(page_records), page_new, page_skip)
-
             page_banner = None
             page_type = None
             page_new = 0
@@ -260,6 +258,8 @@ class GachaScanner:
                     logger.warning("入库失败: {} - {}", record.character_name, e)
                 if self._on_record_found:
                     self._on_record_found(record)
+
+            logger.info("第 {} 页: OCR {} 条, 新增 {}, 跳过 {}", page, len(page_records), page_new, page_skip)
 
             if not self._is_running:
                 logger.info("扫描已中断，共新增 {} 条", new_count)
