@@ -90,7 +90,4 @@ python -m src.main
 
 ## 鸣谢
 
-
-## 鸣谢
-
 - [AzurLaneAutoScript (ALAS)](https://github.com/LmeSzinc/AzurLaneAutoScript) — 本项目的页面图导航（A* BFS）和 Button 多层级识别设计参照了 ALAS 的架构
