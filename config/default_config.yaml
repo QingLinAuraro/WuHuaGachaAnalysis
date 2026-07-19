@@ -28,7 +28,7 @@ gacha:
 game:
   package_name: com.cipaishe.wuhua.bilibili
 gui:
-  last_account_id: 2
+  last_account_id: 3
   theme: dark
   window_height: 600
   window_width: 900
