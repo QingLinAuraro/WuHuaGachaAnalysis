@@ -13,7 +13,7 @@
 
 ---
 
-## 🚀 快速开始（无需编程基础）
+## 快速开始（无需编程基础）
 
 1. 前往 [Releases](https://github.com/QingLinAuraro/WuHuaGachaAnalysis/releases) 页面
 2. 下载最新的 `WuHuaGachaAnalysis-便携版-*.zip`
@@ -22,7 +22,7 @@
 5. 程序自动检查更新 → 安装依赖 → 启动 GUI
 6. 之后每次打开都会自动拉取最新版本
 
-> 💡 首次启动可能需要 10-30 秒初始化，请耐心等待。离线也能正常使用。
+> 首次启动可能需要 10-30 秒初始化，请耐心等待。离线也能正常使用。
 
 ### 使用说明
 
@@ -33,7 +33,7 @@
 
 ---
 
-## 🛠 开发者安装
+## 开发者安装
 
 ```bash
 git clone https://github.com/QingLinAuraro/WuHuaGachaAnalysis.git
@@ -49,60 +49,7 @@ python -m src.main
 
 ---
 
-## 📦 构建便携版（开发者）
-
-将项目打包为自包含的 `.exe` + `.zip`，供无基础用户使用。
-
-### 前置要求
-
-- Python 3.11+
-- PyInstaller：`pip install pyinstaller`
-- 网络连接（首次构建需下载嵌入式 Python + MinGit + ADB 约 150MB）
-
-### 一键构建
-
-```bash
-python build_portable.py                 # 完整构建
-python build_portable.py --skip-download # 跳过下载（toolkit/ 已就绪）
-```
-
-### 构建流程
-
-| 步骤 | 说明 |
-|------|------|
-| 下载嵌入式 Python 3.11 | 自包含运行时，用户无需安装 Python |
-| pip install 依赖 | PyQt6 + PaddleOCR + OpenCV 等全部打入 toolkit/ |
-| 下载 MinGit | 内嵌 Git，用于用户端自更新 |
-| 下载 ADB | 模拟器通信工具 |
-| 编译 .exe | PyInstaller 将 launcher.py 打包为独立 exe |
-| 打包 .zip | 从外层源码 + build/产物 拼合分发包 |
-
-### 产物（build/ 目录仅 3 项）
-
-```
-build/
-├── toolkit/                         # Python + Git + ADB + 所有依赖
-├── 物华弥新抽卡分析器.exe           # 启动器 (~9MB)
-└── WuHuaGachaAnalysis-便携版-*.zip  # 分发包 (~400MB)
-```
-
-> 源码（src/ deploy/ config/ ...）不需要复制到 build/，打包时直接从项目根读取。
-
-### 发布
-
-```bash
-# 1. 推送源码更新
-git add -A && git commit -m "xxx" && git push
-
-# 2. 本地构建
-python build_portable.py --skip-download
-
-# 3. 前往 GitHub Releases 上传 build/ 中的 .zip
-```
-
----
-
-## 🔄 自更新机制
+## 自更新机制
 
 便携版 `.exe` 启动流程：
 
@@ -121,7 +68,7 @@ python build_portable.py --skip-download
 
 ---
 
-## 📁 项目结构
+## 项目结构
 
 ```
 WuHuaGachaAnalysis/
@@ -146,12 +93,10 @@ WuHuaGachaAnalysis/
 ├── launcher.py                    # 启动器（编译为 .exe）
 ├── requirements.txt
 ├── .gitignore
-├── 控制台.bat                     # 调试控制台
 ├── README.md
 └── LICENSE
 ```
 
-> 以下文件仅保留本地，不上传 Git：`build_portable.py`（构建脚本）、`tools/`（开发工具）、`build/`（构建产物）
 
 ---
 
