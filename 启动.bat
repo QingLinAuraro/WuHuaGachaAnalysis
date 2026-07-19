@@ -1,36 +1,68 @@
 @echo off
-chcp 65001 >nul
+setlocal enabledelayedexpansion
 title WuHuaGachaAnalysis
 
 echo ========================================
-echo    WuHuaGachaAnalysis 物华弥新抽卡分析器
+echo    WuHuaGachaAnalysis
 echo ========================================
 echo.
 
-:: 检查 Python
-python --version >nul 2>&1
+:: 查找 Python
+set PYTHON=
+for %%p in (python python3 py) do (
+    %%p --version >nul 2>&1
+    if !errorlevel! equ 0 set PYTHON=%%p
+)
+if "%PYTHON%"=="" set PYTHON=python
+
+%PYTHON% --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [错误] 未找到 Python，请先安装 Python 3.11
-    echo 下载地址: https://www.python.org/downloads/
+    echo [错误] 未找到 Python
+    echo 请安装 Python 3.11: https://www.python.org/downloads/
+    echo 安装时务必勾选 "Add Python to PATH"
     pause
     exit /b 1
 )
 
-:: 检查/创建虚拟环境
-if not exist ".venv" (
+echo Python: 
+%PYTHON% --version
+
+:: 进入脚本所在目录
+cd /d "%~dp0"
+
+:: 创建虚拟环境
+if not exist ".venv\Scripts\activate.bat" (
     echo [1/3] 创建虚拟环境...
-    python -m venv .venv
+    %PYTHON% -m venv .venv
+    if !errorlevel! neq 0 (
+        echo [错误] 创建虚拟环境失败
+        pause
+        exit /b 1
+    )
 )
 
-:: 激活虚拟环境
+:: 激活
 call .venv\Scripts\activate.bat
 
 :: 安装依赖
 echo [2/3] 安装依赖...
-pip install -r requirements.txt -i https://mirror.baidu.com/pypi/simple -q
+pip install -r requirements.txt -q 2>nul
+if !errorlevel! neq 0 (
+    echo 重试安装...
+    pip install -r requirements.txt
+    if !errorlevel! neq 0 (
+        echo [错误] 依赖安装失败，请检查网络连接
+        pause
+        exit /b 1
+    )
+)
 
-:: 启动应用
-echo [3/3] 启动应用...
-python -m src.main
+:: 首次运行自动下载 PaddleOCR 模型
+echo [3/3] 启动（首次需下载 OCR 模型，约 1 分钟）...
+%PYTHON% -m src.main
 
-pause
+if %errorlevel% neq 0 (
+    echo.
+    echo [错误] 程序异常退出 (code: %errorlevel%)
+    pause
+)
