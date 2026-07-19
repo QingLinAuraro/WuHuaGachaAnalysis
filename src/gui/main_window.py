@@ -16,7 +16,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 
 from src.config import config
-from src.storage.database import db
+from src.storage.database import get_db
 from src.emulator.adb_client import ADBClient
 from src.automation.gacha_scanner import GachaScanner
 from src.gui.pages.home_page import HomePage
@@ -325,7 +325,7 @@ class AccountDialog(QDialog):
     def _refresh_list(self):
         from PyQt6.QtWidgets import QListWidgetItem
         self._list.clear()
-        accounts = db.list_accounts()
+        accounts = get_db().list_accounts()
         for acc in accounts:
             item = QListWidgetItem(acc.name)
             item.setData(Qt.ItemDataRole.UserRole, acc.id)
@@ -345,7 +345,7 @@ class AccountDialog(QDialog):
     def _on_new(self):
         name, ok = QInputDialog.getText(self, "新建账户", "账户名称:")
         if ok and name.strip():
-            acc = db.create_account(name.strip())
+            acc = get_db().create_account(name.strip())
             if acc is None:
                 QMessageBox.warning(self, "错误", "账户名已存在或无效")
             else:
@@ -355,20 +355,20 @@ class AccountDialog(QDialog):
         aid = self._selected_id()
         if aid is None:
             return
-        acc = db.get_account(aid)
+        acc = get_db().get_account(aid)
         if acc is None:
             return
         name, ok = QInputDialog.getText(self, "重命名", "新名称:", text=acc.name)
         if ok and name.strip() and name.strip() != acc.name:
-            if not db.rename_account(aid, name.strip()):
+            if not get_db().rename_account(aid, name.strip()):
                 QMessageBox.warning(self, "错误", "重命名失败（名称重复或无效）")
 
     def _on_delete(self):
         aid = self._selected_id()
         if aid is None:
             return
-        acc = db.get_account(aid)
-        if acc is None or acc.name == db.DEFAULT_ACCOUNT_NAME:
+        acc = get_db().get_account(aid)
+        if acc is None or acc.name == get_db().DEFAULT_ACCOUNT_NAME:
             QMessageBox.warning(self, "提示", "不能删除默认账户")
             return
         reply = QMessageBox.question(
@@ -377,7 +377,7 @@ class AccountDialog(QDialog):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            db.delete_account(aid)
+            get_db().delete_account(aid)
             self._refresh_list()
 
 
@@ -468,7 +468,7 @@ class MainWindow(QMainWindow):
         """从数据库加载账户列表到下拉框"""
         self._account_combo.blockSignals(True)
         self._account_combo.clear()
-        self._accounts = db.list_accounts()
+        self._accounts = get_db().list_accounts()
         for acc in self._accounts:
             self._account_combo.addItem(acc.name, acc.id)
 

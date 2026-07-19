@@ -37,7 +37,7 @@ from src.automation.errors import (
 from src.ocr.engine import get_ocr_engine
 from src.ocr.parser import GachaRecordParser
 from src.models.gacha_record import GachaRecord, Rarity, BannerType
-from src.storage.database import db
+from src.storage.database import get_db
 from src.config import config
 
 
@@ -92,21 +92,21 @@ class GachaScanner:
         self._next_page_btn = Button(
             area=(962, 564, 1070, 607),
             button=(962, 564, 1070, 607),
-            file=str(config.project_root / "assets" / "templates" / "gacha" / "details" / "record" / "page_down.png"),
+            file=str(config.resource_root / "assets" / "templates" / "gacha" / "details" / "record" / "page_down.png"),
             similarity=config.get("automation.image_recognition.template_threshold", 0.8),
             name="NEXT_PAGE",
         )
         self._prev_page_btn = Button(
             area=(413, 561, 519, 611),
             button=(413, 561, 519, 611),
-            file=str(config.project_root / "assets" / "templates" / "gacha" / "details" / "record" / "page_up.png"),
+            file=str(config.resource_root / "assets" / "templates" / "gacha" / "details" / "record" / "page_up.png"),
             similarity=config.get("automation.image_recognition.template_threshold", 0.8),
             name="PREV_PAGE",
         )
         self._final_page_btn = Button(
             area=(913, 565, 961, 609),
             button=(913, 565, 961, 609),
-            file=str(config.project_root / "assets" / "templates" / "gacha" / "details" / "record" / "final_page.png"),
+            file=str(config.resource_root / "assets" / "templates" / "gacha" / "details" / "record" / "final_page.png"),
             similarity=config.get("automation.image_recognition.template_threshold", 0.8),
             name="FINAL_PAGE",
         )
@@ -163,7 +163,7 @@ class GachaScanner:
         self._adb.reset_click_history()
 
         # 加载当前账户已有 record_id 用于去重
-        existing_records = db.get_all_records(account_id=self._current_account_id)
+        existing_records = get_db().get_all_records(account_id=self._current_account_id)
         existing_ids: set[str] = {r.record_id for r in existing_records}
 
         max_pn = max((r.pull_number for r in existing_records if r.pull_number > 0), default=0)
@@ -253,7 +253,7 @@ class GachaScanner:
                 self._records.append(record)
 
                 try:
-                    db.add_record(record)
+                    get_db().add_record(record)
                     new_count += 1
                 except Exception as e:
                     logger.warning("入库失败: {} - {}", record.character_name, e)

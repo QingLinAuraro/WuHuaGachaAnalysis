@@ -1,9 +1,9 @@
 """招集主页按钮"""
 
-from pathlib import Path
+from src.config import config
 from src.automation.button import Button
 
-_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_ROOT = config.resource_root
 
 
 # 页面识别

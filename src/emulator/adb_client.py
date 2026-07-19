@@ -337,32 +337,22 @@ KNOWN_EMULATOR_PORTS = {
 }
 
 
-# ADB 可执行文件搜索路径（按优先级）
-_ADB_SEARCH_PATHS = [
-    # MuMu 12 (多版本目录结构)
-    r"C:\Program Files\Netease\MuMu\nx_device\*\shell\adb.exe",
-    r"C:\Program Files\Netease\MuMu Player 12\shell\adb.exe",
-    # 雷电
-    r"C:\Program Files\ldplayer9\adb.exe",
-    # 蓝叠
-    r"C:\Program Files\BlueStacks_nxt\HD-Adb.exe",
-]
-
-
 def find_adb() -> str:
     """自动查找 adb.exe，找不到时返回 'adb'（依赖系统PATH）"""
     import glob as _glob
+    import shutil
 
     # 1. 先检查系统 PATH
-    import shutil
     path_adb = shutil.which("adb")
     if path_adb:
         logger.info("系统PATH中找到 adb: {}", path_adb)
         return path_adb
 
-    # 2. 搜索已知模拟器目录
-    for pattern in _ADB_SEARCH_PATHS:
-        matches = _glob.glob(pattern)
+    # 2. 搜索已知模拟器目录（从配置读取，展开环境变量）
+    search_paths = config.get("adb.search_paths", [])
+    for pattern in search_paths:
+        expanded = os.path.expandvars(pattern)
+        matches = _glob.glob(expanded)
         if matches:
             logger.info("自动搜索找到 adb: {}", matches[0])
             return matches[0]

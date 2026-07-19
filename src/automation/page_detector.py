@@ -42,7 +42,7 @@ class PageDetector:
 
     def __init__(self, templates_dir: Optional[str] = None) -> None:
         self._templates_dir = Path(
-            templates_dir or config.project_root / "assets" / "templates"
+            templates_dir or config.resource_root / "assets" / "templates"
         )
         # 页面 check_buttons: page_name → list[Button]
         self._page_buttons: dict[str, list[Button]] = {}

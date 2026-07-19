@@ -303,5 +303,13 @@ class Database:
             return count
 
 
-# 全局数据库实例
-db = Database()
+# 全局数据库实例（懒加载）
+_db_instance = None
+
+
+def get_db(db_path: str = None) -> "Database":
+    """获取全局数据库实例（懒加载）"""
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = Database(db_path)
+    return _db_instance

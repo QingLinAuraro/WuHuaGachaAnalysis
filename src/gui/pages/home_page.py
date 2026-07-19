@@ -4,16 +4,16 @@ from PyQt6.QtWidgets import (
     QPushButton,
 )
 from PyQt6.QtCore import Qt
-from pathlib import Path
+from src.config import config
 from collections import OrderedDict
 import yaml
 
 from src.models.gacha_record import Rarity, BannerType
-from src.storage.database import db
+from src.storage.database import get_db
 
 
 def _load_up_map():
-    path = Path(__file__).parent.parent.parent.parent / "config" / "names.yaml"
+    path = config.resource_root / "config" / "names.yaml"
     try:
         with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f).get("banners", {})
@@ -31,9 +31,9 @@ def _build_timeline(account_id: int = 0):
     """构建指定账户的卡池时间线"""
     up_map = _load_up_map()
     if account_id > 0:
-        records = db.get_all_records(account_id=account_id)
+        records = get_db().get_all_records(account_id=account_id)
     else:
-        records = db.get_all_records()  # 无账户筛选（兼容）
+        records = get_db().get_all_records()  # 无账户筛选（兼容）
     if not records:
         return [], 0, 0, 0, {}, ""
 
@@ -78,7 +78,7 @@ def _build_timeline(account_id: int = 0):
     # 获取账户名称
     account_name = ""
     if account_id:
-        acc = db.get_account(account_id)
+        acc = get_db().get_account(account_id)
         if acc:
             account_name = acc.name
 

@@ -240,5 +240,22 @@ gacha_export*.json
 *.png
 !assets/**/*.png
 !screenshots/_*.png
+
+# 便携打包 — 自包含运行时
+/toolkit/
+
+# 用户数据
+/user_config.yaml
+
+# 部署配置（用户可编辑，模板在 deploy/template）
+/config/deploy.yaml
+
+# PyInstaller 产物
+/物华弥新抽卡分析器.spec
+
+# 构建输出
+/build/
+/dist/
+
 实现内容.docx
 ~实现内容.docx

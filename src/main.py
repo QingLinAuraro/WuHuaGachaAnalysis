@@ -11,11 +11,12 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from loguru import logger
+from src.config import config
 
 
 def setup_logging() -> None:
     """配置日志系统"""
-    log_dir = Path(__file__).parent.parent / "logs"
+    log_dir = config.data_root / "logs"
     log_dir.mkdir(exist_ok=True)
 
     logger.remove()  # 移除默认handler
@@ -42,6 +43,7 @@ def main() -> None:
 
     # 启动 GUI
     from src.gui.main_window import launch_gui
+
     launch_gui()
 
 

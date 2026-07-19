@@ -6,7 +6,7 @@ OCR 结果解析器
 import re
 from datetime import datetime
 from difflib import SequenceMatcher
-from pathlib import Path
+from src.config import config
 from typing import Optional
 
 import yaml
@@ -68,7 +68,7 @@ class GachaRecordParser:
 
     def _load_name_dict(self) -> None:
         """加载器者名称和卡池名称词库，同时构建名称→稀有度映射"""
-        names_path = Path(__file__).parent.parent.parent / "config" / "names.yaml"
+        names_path = config.resource_root / "config" / "names.yaml"
         if not names_path.exists():
             logger.warning("词库文件不存在: {}", names_path)
             return

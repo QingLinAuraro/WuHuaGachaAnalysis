@@ -9,7 +9,8 @@ from datetime import datetime
 from typing import Optional
 
 from src.models.gacha_record import GachaRecord
-from src.storage.database import db
+from src.storage.database import get_db
+from src.config import config
 
 
 def export_to_json(
@@ -21,7 +22,7 @@ def export_to_json(
     导出抽卡记录为 JSON 文件，按倒序（最新在前）
     返回导出文件的路径
     """
-    records = db.get_all_records(account_id=account_id, banner_name=banner_name,
+    records = get_db().get_all_records(account_id=account_id, banner_name=banner_name,
                                  order_by="pull_number")
     records.reverse()  # 最新在前
 
@@ -34,8 +35,10 @@ def export_to_json(
     }
 
     if output_path is None:
+        exports_dir = config.data_root / "exports"
+        exports_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = f"gacha_export_{timestamp}.json"
+        output_path = str(exports_dir / f"gacha_export_{timestamp}.json")
 
     output_path = str(Path(output_path).resolve())
     with open(output_path, "w", encoding="utf-8") as f:
@@ -64,6 +67,6 @@ def import_from_json(file_path: str, account_id: int = 0) -> int:
         raw = f"{record.character_name}_{record.rarity.value}_{tk}_{record.banner_name}_{record.account_id}_{record.pull_number}"
         import hashlib
         record.record_id = hashlib.md5(raw.encode()).hexdigest()[:12]
-        if db.add_record(record):
+        if get_db().add_record(record):
             count += 1
     return count

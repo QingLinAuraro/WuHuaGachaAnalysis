@@ -2,6 +2,11 @@ adb:
   path: adb
   screenshot_dir: screenshots
   serial: auto
+  search_paths:
+    - "%ProgramFiles%/Netease/MuMu/nx_device/*/shell/adb.exe"
+    - "%ProgramFiles%/Netease/MuMu Player 12/shell/adb.exe"
+    - "%ProgramFiles%/ldplayer9/adb.exe"
+    - "%ProgramFiles%/BlueStacks_nxt/HD-Adb.exe"
 automation:
   image_recognition:
     action_interval: 0.5
