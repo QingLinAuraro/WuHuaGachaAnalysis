@@ -51,6 +51,7 @@ class GachaRecordParser:
         self._char_names: list[str] = []
         self._banner_names: list[str] = []
         self._banner_up: dict[str, str] = {}  # 卡池名 → UP 角色
+        self._name_to_rarity: dict[str, Rarity] = {}  # 器者名 → 稀有度
         self._load_name_dict()
 
     def set_banner(self, name: str, banner_type: str = BannerType.UNKNOWN) -> None:
@@ -63,10 +64,21 @@ class GachaRecordParser:
         up = self._banner_up.get(banner_name, "")
         return bool(up) and up == character_name
 
+    def lookup_rarity(self, character_name: str) -> Optional[Rarity]:
+        """从词库查找器者稀有度（已纠错后的名称）"""
+        return self._name_to_rarity.get(character_name)
+
     # ── 词库加载与模糊匹配 ──────────────────────────
 
+    # 稀有度关键词 → Rarity 枚举
+    _RARITY_MAP = {
+        "特出": Rarity.SPECIAL,
+        "优异": Rarity.EXCELLENT,
+        "新生": Rarity.FINE,
+    }
+
     def _load_name_dict(self) -> None:
-        """加载器者名称和卡池名称词库"""
+        """加载器者名称和卡池名称词库，同时构建名称→稀有度映射"""
         names_path = Path(__file__).parent.parent.parent / "config" / "names.yaml"
         if not names_path.exists():
             logger.warning("词库文件不存在: {}", names_path)
@@ -75,8 +87,17 @@ class GachaRecordParser:
             with open(names_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
             if data:
-                chars = data.get("characters", "")
-                self._char_names = self._extract_names(chars)
+                chars = data.get("characters", {})
+                self._char_names = []
+                self._name_to_rarity = {}
+                if isinstance(chars, dict):
+                    for profession, rarities in chars.items():
+                        if isinstance(rarities, dict):
+                            for rarity_name, names_block in rarities.items():
+                                rarity = self._RARITY_MAP.get(rarity_name, Rarity.FINE)
+                                for name in self._extract_names(names_block):
+                                    self._char_names.append(name)
+                                    self._name_to_rarity[name] = rarity
                 banners_raw = data.get("banners", {})
                 if isinstance(banners_raw, dict):
                     self._banner_up = banners_raw
@@ -171,12 +192,12 @@ class GachaRecordParser:
 
     # ── 基于列位置的解析（推荐） ──────────────────────
 
-    # 四列在截图中的 x 比例范围（基于 _grid.png 1284px 宽标注）
+    # 三列在截图中的 x 比例范围（已裁剪稀有度列 x<420）
+    # 新坐标系：原图 x-420，宽度=860
     COLUMN_RANGES = [
-        ("rarity", 250 / 1284, 420 / 1284),   # 稀有度
-        ("name",   420 / 1284, 750 / 1284),   # 器者名称
-        ("banner", 750 / 1284, 920 / 1284),   # 卡池
-        ("time",   920 / 1284, 1250 / 1284),  # 时间
+        ("name",   0   / 860, 330 / 860),   # 器者名称
+        ("banner", 330 / 860, 500 / 860),   # 卡池
+        ("time",   500 / 860, 830 / 860),   # 时间
     ]
 
     def parse_record_from_ocr_results(
@@ -203,14 +224,13 @@ class GachaRecordParser:
         if not ocr_results:
             return None
 
-        # 按 x 坐标归入各列
+        # 按 x 坐标归入各列（稀有度列已裁剪，不再读取）
         col_texts: dict[str, list[str]] = {
-            "rarity": [], "name": [], "banner": [], "time": []
+            "name": [], "banner": [], "time": []
         }
 
         for r in ocr_results:
             box = r["box"]
-            # 计算文本框的 x 中心
             xs = [p[0] for p in box]
             x_center = sum(xs) / len(xs)
             x_ratio = x_center / img_width
@@ -220,20 +240,18 @@ class GachaRecordParser:
                     col_texts[col_name].append(r["text"])
                     break
 
-        # 合并各列文本
-        rarity_str = " ".join(col_texts["rarity"])
         name_str = " ".join(col_texts["name"])
         banner_str = " ".join(col_texts["banner"])
         time_str = " ".join(col_texts["time"])
 
         logger.debug(
-            "列解析: 稀有度=[{}] 器者=[{}] 卡池=[{}] 时间=[{}]",
-            rarity_str, name_str, banner_str, time_str,
+            "列解析: 器者=[{}] 卡池=[{}] 时间=[{}]",
+            name_str, banner_str, time_str,
         )
 
-        # 各列提取
-        rarity = self._extract_rarity_from_text(rarity_str)
+        # 名称（经词库纠错）→ 稀有度从 yaml 查
         character_name = self._extract_name_from_column(name_str)
+        rarity = self.lookup_rarity(character_name) if character_name else None
         pull_time = self._extract_time(time_str)
 
         banner_from_ocr, pool_type = self._extract_banner_from_text(banner_str)
@@ -241,8 +259,8 @@ class GachaRecordParser:
             self.banner_name = banner_from_ocr
             self.banner_type = pool_type or BannerType.EVENT
 
-        if not character_name or rarity is None:
-            logger.debug("列解析失败 - 稀有度=[{}] 器者=[{}]", rarity_str, name_str)
+        if not character_name:
+            logger.debug("列解析失败 - 器者=[{}]", name_str)
             return None
 
         if pull_time is None:
@@ -250,7 +268,7 @@ class GachaRecordParser:
 
         return GachaRecord(
             character_name=character_name,
-            rarity=rarity,
+            rarity=rarity or Rarity.FINE,
             pull_time=pull_time,
             banner_name=self.banner_name,
             banner_type=self.banner_type,

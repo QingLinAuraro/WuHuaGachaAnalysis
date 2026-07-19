@@ -27,7 +27,7 @@ def setup_logging() -> None:
     logger.add(
         log_dir / "wuhua_{time:YYYY-MM-DD}.log",
         rotation="10 MB",
-        retention="30 days",
+        retention="1 day",
         encoding="utf-8",
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
         level="DEBUG",
@@ -39,10 +39,6 @@ def main() -> None:
     """主入口"""
     setup_logging()
     logger.info("物华弥新抽卡分析器 v{}", __import__("src").__version__)
-
-    # from src.storage.database import db
-    # count = db.clear_all()
-    # logger.info("数据库已清空 ({} 条旧记录)", count)
 
     # 启动 GUI
     from src.gui.main_window import launch_gui

@@ -3,7 +3,6 @@
 读取和解析 config/default_config.yaml
 """
 
-import os
 import yaml
 from pathlib import Path
 from typing import Any, Optional
@@ -97,16 +96,30 @@ class Config:
         return self._project_root
 
     @property
-    def data_dir(self) -> Path:
-        d = Path(self.get("database.path")).parent
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    @property
     def screenshot_dir(self) -> Path:
         d = Path(self.get("adb.screenshot_dir"))
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def set(self, key: str, value: Any) -> None:
+        """设置配置项，支持点分隔路径，自动保存"""
+        keys = key.split(".")
+        target: dict = self._data
+        for k in keys[:-1]:
+            if k not in target or not isinstance(target[k], dict):
+                target[k] = {}
+            target = target[k]
+        target[keys[-1]] = value
+        self._save()
+
+    def _save(self) -> None:
+        """保存配置到 YAML 文件"""
+        try:
+            import yaml
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(self._data, f, allow_unicode=True, default_flow_style=False)
+        except Exception:
+            pass  # 静默忽略保存失败
 
 
 config = Config()

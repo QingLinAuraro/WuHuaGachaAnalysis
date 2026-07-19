@@ -58,8 +58,7 @@ WuHuaGachaAnalysis/
 │   └── styles/                     # 样式
 ├── config/
 │   ├── default_config.yaml         # 默认配置（ADB/OCR/扫描参数）
-│   ├── names.yaml                  # 器者名称 + 卡池 UP 词库
-│   └── coords_example.yaml         # 坐标配置示例
+│   └── names.yaml                  # 器者名称 + 卡池 UP 词库
 ├── tools/
 │   └── coordinate_viewer.py        # 坐标标记查看工具
 ├── tests/

@@ -3,17 +3,20 @@
 ALAS风格：简洁紧凑，左侧导航 + 右侧内容 + 底部日志
 """
 import sys
+from datetime import datetime
 from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QPushButton, QLabel, QStatusBar, QFrame,
-    QTextEdit, QSplitter,
+    QTextEdit, QSplitter, QComboBox, QInputDialog, QMessageBox,
+    QDialog, QDialogButtonBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 
 from src.config import config
+from src.storage.database import db
 from src.emulator.adb_client import ADBClient
 from src.automation.gacha_scanner import GachaScanner
 from src.gui.pages.home_page import HomePage
@@ -213,6 +216,35 @@ QTabBar::tab:hover { color: #d4d4d4; }
     color: rgba(255,255,255,0.8);
     font-size: 12px;
 }
+#accountCombo {
+    background-color: rgba(255,255,255,0.15);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    padding: 2px 8px;
+    min-width: 90px;
+    max-width: 130px;
+    font-size: 12px;
+}
+#accountCombo:hover { background-color: rgba(255,255,255,0.25); }
+#accountCombo::drop-down { border: none; padding-right: 4px; }
+#accountCombo QAbstractItemView {
+    background-color: #2d2d2d;
+    color: #d4d4d4;
+    border: 1px solid #3c3c3c;
+    selection-background-color: #264f78;
+    font-size: 12px;
+}
+#manageAccountBtn {
+    background-color: rgba(255,255,255,0.15);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    max-height: 22px;
+}
+#manageAccountBtn:hover { background-color: rgba(255,255,255,0.25); }
 
 /* === 侧边栏 === */
 #sidebar {
@@ -246,7 +278,107 @@ class ScannerSignals(QObject):
     status_msg = pyqtSignal(str)
     scan_done = pyqtSignal(int)
     scan_error = pyqtSignal(str)
-    record_found = pyqtSignal(str)
+
+
+class AccountDialog(QDialog):
+    """账户管理对话框"""
+    def __init__(self, parent=None, current_account_id: int = 0):
+        super().__init__(parent)
+        self.setWindowTitle("管理账户")
+        self.setFixedSize(350, 280)
+        self._current_id = current_account_id
+        self._setup()
+
+    def _setup(self):
+        from PyQt6.QtWidgets import QListWidget, QListWidgetItem
+        root = QVBoxLayout(self)
+        root.setSpacing(8)
+
+        self._list = QListWidget()
+        self._list.setStyleSheet("background:#252526; color:#d4d4d4; border:1px solid #3c3c3c;")
+        root.addWidget(self._list)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+
+        b_new = QPushButton("新建")
+        b_new.clicked.connect(self._on_new)
+        btn_row.addWidget(b_new)
+
+        b_rename = QPushButton("重命名")
+        b_rename.clicked.connect(self._on_rename)
+        btn_row.addWidget(b_rename)
+
+        b_del = QPushButton("删除")
+        b_del.setProperty("danger", True)
+        b_del.clicked.connect(self._on_delete)
+        btn_row.addWidget(b_del)
+
+        root.addLayout(btn_row)
+
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        bb.accepted.connect(self.accept)
+        root.addWidget(bb)
+
+        self._refresh_list()
+
+    def _refresh_list(self):
+        from PyQt6.QtWidgets import QListWidgetItem
+        self._list.clear()
+        accounts = db.list_accounts()
+        for acc in accounts:
+            item = QListWidgetItem(acc.name)
+            item.setData(Qt.ItemDataRole.UserRole, acc.id)
+            if acc.id == self._current_id:
+                item.setForeground(Qt.GlobalColor.cyan)
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+            self._list.addItem(item)
+
+    def _selected_id(self) -> Optional[int]:
+        item = self._list.currentItem()
+        if item:
+            return item.data(Qt.ItemDataRole.UserRole)
+        return None
+
+    def _on_new(self):
+        name, ok = QInputDialog.getText(self, "新建账户", "账户名称:")
+        if ok and name.strip():
+            acc = db.create_account(name.strip())
+            if acc is None:
+                QMessageBox.warning(self, "错误", "账户名已存在或无效")
+            else:
+                self._refresh_list()
+
+    def _on_rename(self):
+        aid = self._selected_id()
+        if aid is None:
+            return
+        acc = db.get_account(aid)
+        if acc is None:
+            return
+        name, ok = QInputDialog.getText(self, "重命名", "新名称:", text=acc.name)
+        if ok and name.strip() and name.strip() != acc.name:
+            if not db.rename_account(aid, name.strip()):
+                QMessageBox.warning(self, "错误", "重命名失败（名称重复或无效）")
+
+    def _on_delete(self):
+        aid = self._selected_id()
+        if aid is None:
+            return
+        acc = db.get_account(aid)
+        if acc is None or acc.name == db.DEFAULT_ACCOUNT_NAME:
+            QMessageBox.warning(self, "提示", "不能删除默认账户")
+            return
+        reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定删除账户「{acc.name}」及其所有抽卡记录？\n此操作不可撤销！",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            db.delete_account(aid)
+            self._refresh_list()
 
 
 class MainWindow(QMainWindow):
@@ -255,11 +387,18 @@ class MainWindow(QMainWindow):
         self._adb: Optional[ADBClient] = None
         self._scanner: Optional[GachaScanner] = None
         self._signals = ScannerSignals()
+        self._current_account_id: int = 0
+        self._accounts: list = []
         self._setup_ui()
         self._connect_signals()
+        self._load_accounts()
         self.setStyleSheet(STYLE)
         self._nav_buttons[0].setChecked(True)
         self._stack.setCurrentIndex(0)
+
+    @property
+    def current_account_id(self) -> int:
+        return self._current_account_id
 
     def _connect_signals(self) -> None:
         self._signals.log_msg.connect(self._on_log)
@@ -268,7 +407,44 @@ class MainWindow(QMainWindow):
         self._signals.scan_error.connect(self._on_scan_error)
 
     def _on_log(self, msg: str) -> None:
+        now = datetime.now()
         self._log.append(msg)
+        # 每50条清理一次超过10分钟的旧日志
+        if not hasattr(self, '_log_trim_counter'):
+            self._log_trim_counter = 0
+        self._log_trim_counter += 1
+        if self._log_trim_counter % 50 == 0:
+            self._trim_old_logs()
+
+    def _trim_old_logs(self) -> None:
+        """移除超过10分钟的日志行"""
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(minutes=10)
+        doc = self._log.document()
+        blocks_to_remove = []
+        for i in range(doc.blockCount()):
+            block = doc.findBlockByNumber(i)
+            text = block.text()
+            # 日志格式: "HH:MM:SS | LEVEL | message"
+            if len(text) >= 8 and text[2] == ':':
+                try:
+                    h, m, s = int(text[0:2]), int(text[3:5]), int(text[6:8])
+                    log_time = datetime.now().replace(hour=h, minute=m, second=s, microsecond=0)
+                    if log_time < cutoff:
+                        blocks_to_remove.append(i)
+                except (ValueError, IndexError):
+                    pass
+        # 从后往前删避免索引错乱
+        for i in reversed(blocks_to_remove):
+            cursor = self._log.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            for _ in range(i):
+                cursor.movePosition(cursor.MoveOperation.Down)
+            cursor.movePosition(cursor.MoveOperation.StartOfLine, cursor.MoveMode.MoveAnchor)
+            cursor.movePosition(cursor.MoveOperation.Down, cursor.MoveMode.KeepAnchor)
+            cursor.movePosition(cursor.MoveOperation.EndOfLine, cursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.deleteChar()  # 删除换行符
 
     def _on_scan_done(self, count: int) -> None:
         self.log_msg(f"[完成] 共扫描 {count} 条记录")
@@ -285,6 +461,47 @@ class MainWindow(QMainWindow):
     def log_msg(self, msg: str) -> None:
         """线程安全的日志方法"""
         self._signals.log_msg.emit(msg)
+
+    # ── 账户管理 ──────────────────────────────────────
+
+    def _load_accounts(self) -> None:
+        """从数据库加载账户列表到下拉框"""
+        self._account_combo.blockSignals(True)
+        self._account_combo.clear()
+        self._accounts = db.list_accounts()
+        for acc in self._accounts:
+            self._account_combo.addItem(acc.name, acc.id)
+
+        # 恢复上次选中的账户
+        last_id = config.get("gui.last_account_id", 0)
+        found = False
+        for i, acc in enumerate(self._accounts):
+            if acc.id == last_id:
+                self._account_combo.setCurrentIndex(i)
+                self._current_account_id = acc.id
+                found = True
+                break
+        if not found and self._accounts:
+            self._account_combo.setCurrentIndex(0)
+            self._current_account_id = self._accounts[0].id
+        self._account_combo.blockSignals(False)
+        self.refresh_all_pages()
+
+    def _on_account_changed(self, idx: int) -> None:
+        if idx < 0:
+            return
+        self._current_account_id = self._account_combo.currentData()
+        config.set("gui.last_account_id", self._current_account_id)
+        self.log_msg(f"[INFO] 切换到账户: {self._account_combo.currentText()}")
+        self.refresh_all_pages()
+
+    def _on_manage_accounts(self) -> None:
+        dlg = AccountDialog(self, self._current_account_id)
+        dlg.exec()
+        self._load_accounts()
+        self.refresh_all_pages()
+
+    # ── UI 构建 ──────────────────────────────────────
 
     def _setup_ui(self) -> None:
         w, h = config.get("gui.window_width", 1100), config.get("gui.window_height", 680)
@@ -308,6 +525,21 @@ class MainWindow(QMainWindow):
         t.setObjectName("titleLabel")
         t.setFont(QFont("", 12, QFont.Weight.Bold))
         bl.addWidget(t)
+
+        # 账户选择
+        self._account_combo = QComboBox()
+        self._account_combo.setObjectName("accountCombo")
+        self._account_combo.setFixedHeight(24)
+        self._account_combo.currentIndexChanged.connect(self._on_account_changed)
+        bl.addWidget(self._account_combo)
+
+        btn_mgr = QPushButton("⚙")
+        btn_mgr.setObjectName("manageAccountBtn")
+        btn_mgr.setFixedSize(26, 22)
+        btn_mgr.setToolTip("管理账户")
+        btn_mgr.clicked.connect(self._on_manage_accounts)
+        bl.addWidget(btn_mgr)
+
         bl.addStretch()
         self._dev_lbl = QLabel("设备: --")
         self._dev_lbl.setObjectName("deviceLabel")
@@ -358,6 +590,7 @@ class MainWindow(QMainWindow):
         ]
         s = self._pages[1]
         s.on_adb_connected = self._on_adb_ready
+        s.main_window = self
         for p in self._pages:
             self._stack.addWidget(p)
         top_layout.addWidget(self._stack)
@@ -395,12 +628,13 @@ class MainWindow(QMainWindow):
         self._dev_lbl.setText(f"设备: {text}")
 
     def set_scan_enabled(self, enabled: bool) -> None:
-        self._scan_btn.setEnabled(True)
+        """切换扫描按钮状态：True=可开始扫描, False=扫描中可停止"""
+        self._scan_btn.setEnabled(True)  # 始终可点击
         if enabled:
             self._scan_btn.setText("开始扫描")
             self._scan_btn.setProperty("danger", True)
         else:
-            self._scan_btn.setText("停止扫描")
+            self._scan_btn.setText("⏹ 停止扫描")
             self._scan_btn.setProperty("danger", False)
         self._scan_btn.style().unpolish(self._scan_btn)
         self._scan_btn.style().polish(self._scan_btn)
@@ -445,6 +679,7 @@ class MainWindow(QMainWindow):
         import threading
 
         self._scanner = create_scanner(self._adb)
+        self._scanner.set_account(self._current_account_id)
         self._scanner.set_banner("活动招募", BannerType.EVENT)
 
         sig = self._signals

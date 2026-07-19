@@ -229,6 +229,9 @@ screenshots/*.png
 # Database directory
 data/
 
+# Tools (dev only)
+tools/
+
 # Export files
 gacha_export*.json
 
@@ -236,3 +239,4 @@ gacha_export*.json
 *.png
 !assets/**/*.png
 !screenshots/_*.png
+实现内容.docx

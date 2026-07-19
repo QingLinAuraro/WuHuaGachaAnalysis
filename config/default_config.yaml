@@ -1,85 +1,43 @@
-# 物华弥新抽卡分析器 - 默认配置文件
-# ==========================================
-
 adb:
-  # ADB 可执行文件路径，"adb" 表示使用系统 PATH 中的版本
-  path: "adb"
-  # 设备序列号，"auto" 表示自动检测
-  serial: "auto"
-  # 截图保存目录
-  screenshot_dir: "screenshots"
-
-emulator:
-  # 模拟器类型: auto / mumu / ldplayer / bluestacks
-  type: "auto"
-  # 各模拟器默认 ADB 端口
-  adb_port:
-    mumu: 16384
-    ldplayer: 5555
-    bluestacks: 5555
-
-game:
-  # 物华弥新 B站服 包名
-  package_name: "com.cipaishe.wuhua.bilibili"
-
-ocr:
-  # OCR 引擎: paddleocr / tesseract
-  engine: "paddleocr"
-  # 识别语言
-  lang: "ch"
-  # 是否使用 GPU 加速
-  use_gpu: false
-
-gacha:
-  # 翻页后等待时间（秒）
-  scan_page_delay: 2.0
-  # 每条记录的最小高度（像素），10条/页 → 每条约55px
-  record_height_min: 45
-  # 每条记录的最大高度（像素）
-  record_height_max: 85
-
+  path: adb
+  screenshot_dir: screenshots
+  serial: auto
 automation:
-  # UI 坐标配置文件 (可选，用于替换硬编码坐标)
-  # 使用 tools/coordinate_viewer.py 标记点位后导出 YAML/JSON
-  # 不配置则使用 ui_navigator.py 中内置的预设坐标
-  coords_file: ""
-
-  # 模板资源目录
-  templates_dir: "assets/templates"
-
-  # ═══ 图像识别配置 ═══
+  coords_file: ''
   image_recognition:
-    # 模板匹配阈值 (0.0 - 1.0，越高越严格)
-    # 0.80=宽松（适合有轻微变化的UI），0.90=严格，0.95=非常严格
-    template_threshold: 0.80
-
-    # 颜色匹配容差 (Photoshop 风格, 0-255)
-    # 10=严格（颜色必须非常接近），30=宽松（允许一定色差）
-    color_tolerance: 10
-
-    # 导航超时（秒）
-    # 从当前页面导航到目标页面的最大等待时间
-    navigation_timeout: 30
-
-    # 每个动作后的等待间隔（秒）
     action_interval: 0.5
-
-    # 最大重试次数
-    # 每个导航步骤失败后的重试次数
+    color_tolerance: 10
     max_retries: 3
-
-    # 截图验证最小分辨率 (宽度, 高度)
-    min_width: 640
     min_height: 360
-
+    min_width: 640
+    navigation_timeout: 30
+    template_threshold: 0.8
+  templates_dir: assets/templates
 database:
-  # SQLite 数据库文件路径
-  path: "data/gacha.db"
-
+  host: localhost
+  port: 3306
+  user: QingLinAuraro
+  password: root
+  name: wuhuagacha
+  charset: utf8mb4
+emulator:
+  adb_port:
+    bluestacks: 5555
+    ldplayer: 5555
+    mumu: 16384
+  type: auto
+gacha:
+  record_height_max: 85
+  record_height_min: 45
+  scan_page_delay: 2.0
+game:
+  package_name: com.cipaishe.wuhua.bilibili
 gui:
-  # 主题: light / dark
-  theme: "dark"
-  # 窗口宽度
-  window_width: 900
-  # 窗口高度
+  last_account_id: 2
+  theme: dark
   window_height: 600
+  window_width: 900
+ocr:
+  engine: paddleocr
+  lang: ch
+  use_gpu: false
