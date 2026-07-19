@@ -45,10 +45,9 @@ def _build_timeline(account_id: int = 0):
     for r in records:
         pk = _pool_key(r.banner_type)
         pity[pk] = pity.get(pk, 0) + 1
-        if r.banner_name:
-            pool_banner[pk] = (r.banner_name, r.banner_type)
+        bn = r.banner_name or "未知"
+        pool_banner[pk] = (bn, r.banner_type)
         if r.rarity == Rarity.SPECIAL:
-            bn = r.banner_name or "未知"
             up_char = up_map.get(bn, "")
             off = up_char and r.character_name != up_char
             if bn not in banners:
@@ -164,13 +163,16 @@ class HomePage(QWidget):
             if w:
                 w.deleteLater()
 
-        if not banners:
+        if not banners and not pool_pity:
             self._stat.setText("暂无记录")
             self._list.addStretch()
             return
 
         rate = ((total_5 - off_count) / total_5 * 100) if total_5 > 0 else 0
-        header = f"总抽数: {total}  |  特出: {total_5}/{off_count}  |  不歪率: {rate:.1f}%"
+        if total_5 > 0:
+            header = f"总抽数: {total}  |  特出: {total_5}/{off_count}  |  不歪率: {rate:.1f}%"
+        else:
+            header = f"总抽数: {total}  |  暂无特出（仅显示垫抽）"
         if account_name:
             header = f"[{account_name}]  " + header
         self._stat.setText(header)
