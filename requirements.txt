@@ -1,0 +1,25 @@
+# WuHuaGachaAnalysis - Dependencies
+# Python 3.11
+# =====================================
+# 国内用户建议使用百度镜像加速:
+#   pip install -r requirements.txt -i https://mirror.baidu.com/pypi/simple
+# =====================================
+
+# GUI Framework
+PyQt6>=6.5.0,<7.0.0
+
+# OCR Engine
+paddlepaddle>=2.6.0,<3.0.0
+paddleocr>=2.8.0,<3.0.0
+opencv-python>=4.8.0,<5.0.0
+
+# Image Processing
+Pillow>=10.0.0,<12.0.0
+numpy>=1.24.0
+
+# Data & Config
+pyyaml>=6.0,<7.0.0
+sqlalchemy>=2.0.0,<3.0.0
+
+# Logging
+loguru>=0.7.0,<1.0.0

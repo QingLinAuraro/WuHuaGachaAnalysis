@@ -1,0 +1,56 @@
+# ============================================
+# WuHuaGachaAnalysis 便携版 - Git 忽略规则
+# ============================================
+
+# --- 构建产物 ---
+_pyinstaller_build/
+*.zip
+get-pip.py
+*.spec
+*.manifest
+.DS_Store
+Thumbs.db
+
+# --- 自包含运行时（太大不进 git）---
+/toolkit/
+
+# --- 编译产物 ---
+__pycache__/
+*.py[codz]
+*.pyc
+*.pyd
+*.so
+*.dll
+
+# --- 用户运行时数据 ---
+*.db
+*.sqlite3
+/user_config.yaml
+/config/deploy.yaml
+gacha_export*.json
+
+# --- 日志 ---
+logs/*.log
+!logs/.gitkeep
+
+# --- 截图（保留 .gitkeep）---
+screenshots/*.png
+!screenshots/.gitkeep
+!screenshots/_*.png
+
+# --- IDE / 编辑器 ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Python 相关 ---
+.venv/
+venv/
+env/
+.eggs/
+*.egg-info/
+
+# --- 测试 & 工具（便携版不需要）---
+tools/
+tests/

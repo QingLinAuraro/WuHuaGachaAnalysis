@@ -1,0 +1,26 @@
+adb:
+  path: adb
+  screenshot_dir: screenshots
+  serial: auto
+  search_paths:
+    - "%ProgramFiles%/Netease/MuMu/nx_device/*/shell/adb.exe"
+    - "%ProgramFiles%/Netease/MuMu Player 12/shell/adb.exe"
+    - "%ProgramFiles%/ldplayer9/adb.exe"
+    - "%ProgramFiles%/BlueStacks_nxt/HD-Adb.exe"
+automation:
+  image_recognition:
+    action_interval: 0.5
+    color_tolerance: 10
+    max_retries: 3
+    min_height: 360
+    min_width: 640
+    navigation_timeout: 30
+    template_threshold: 0.8
+database:
+  path: data/gacha.db
+gacha:
+  scan_page_delay: 2.0
+gui:
+  last_account_id: 1
+  window_height: 600
+  window_width: 900
