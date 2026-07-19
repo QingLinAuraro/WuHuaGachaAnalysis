@@ -88,13 +88,9 @@ python -m src.main
 3. 点击"开始扫描"，程序自动导航并识别全部召集记录
 4. 在"首页概览"查看按卡池分组的时间线和统计
 
-## 技术栈
+## 鸣谢
 
-| 模块 | 技术 |
-|------|------|
-| GUI | PyQt6 |
-| OCR | PaddleOCR（子进程批量处理） |
-| 图像识别 | OpenCV（模板匹配 + 颜色检测） |
-| 模拟器控制 | ADB (subprocess) |
-| 数据库 | SQLite + SQLAlchemy（零配置） |
-| 日志 | loguru |
+
+## 鸣谢
+
+- [AzurLaneAutoScript (ALAS)](https://github.com/LmeSzinc/AzurLaneAutoScript) — 本项目的页面图导航（A* BFS）和 Button 多层级识别设计参照了 ALAS 的架构
