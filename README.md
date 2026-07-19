@@ -53,16 +53,7 @@ WuHuaGachaAnalysis/
 └── README.md
 ```
 
-## 快速开始
-
-### 环境要求
-
-- Python 3.11
-- Windows（推荐）/ macOS / Linux
-- ADB (Android Debug Bridge)
-- 模拟器（MuMu / 雷电 / 蓝叠）
-
-### 安装
+## 有编程基础安装教学
 
 ```bash
 # 克隆仓库
@@ -81,15 +72,19 @@ pip install -r requirements.txt
 python -m src.main
 ```
 
+###无编程基础安装教学
+
+1.在当前界面的右侧找到最新的release，点击进入
+2.在最下面找到.zip文件，下载后解压缩，路径不要添加中文
+3.点击.exe文件运行
+
+
 ### 使用说明
 
 1. 模拟器打开《物华弥新》，进入主界面
 2. 启动程序，在"设置"页面连接模拟器
 3. 点击"开始扫描"，程序自动导航并识别全部召集记录
 4. 在"首页概览"查看按卡池分组的时间线和统计
-
-## 鸣谢
-
 
 ## 鸣谢
 
