@@ -1,7 +1,7 @@
 Deploy:
   Git:
     Repository: 'https://github.com/QingLinAuraro/WuHuaGachaAnalysis'
-    Branch: 'release'
+    Branch: 'master'
     GitExecutable: './toolkit/Git/mingw64/bin/git.exe'
     GitProxy: null
     SSLVerify: true
