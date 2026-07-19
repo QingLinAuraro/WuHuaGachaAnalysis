@@ -362,9 +362,12 @@ class GachaScanner:
                 name = self._extract_name_from_ocr(ocr_results)
                 if name:
                     rarity = self._parser.lookup_rarity(name)
+                    # 尝试从 OCR 中提取时间，失败再用当前时间
+                    time_text = " ".join(r["text"] for r in ocr_results if r.get("text"))
+                    pull_time = self._parser._extract_time(time_text) or datetime.now()
                     record = GachaRecord(
                         character_name=name, rarity=Rarity(rarity) if rarity else Rarity.FINE,
-                        pull_time=datetime.now(),
+                        pull_time=pull_time,
                         banner_name=self._current_banner_name,
                         banner_type=self._current_banner_type,
                     )
