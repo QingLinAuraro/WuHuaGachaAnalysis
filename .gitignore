@@ -233,6 +233,9 @@ data/
 tools/
 tests/
 
+# Build scripts (dev only, local use)
+build_portable.py
+
 # Export files
 gacha_export*.json
 
