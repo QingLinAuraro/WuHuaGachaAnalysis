@@ -93,9 +93,23 @@ class HomePage(QWidget):
         l.setContentsMargins(12, 8, 12, 8)
         l.setSpacing(4)
 
+        # 统计栏 + 导出导入
+        top = QHBoxLayout()
         self._stat = QLabel()
         self._stat.setStyleSheet("color:#888; font-size:13px; padding:4px 0;")
-        l.addWidget(self._stat)
+        top.addWidget(self._stat)
+        top.addStretch()
+
+        btn_export = QPushButton("导出 JSON")
+        btn_export.setFixedHeight(26)
+        btn_export.clicked.connect(self._export_json)
+        top.addWidget(btn_export)
+
+        btn_import = QPushButton("导入 JSON")
+        btn_import.setFixedHeight(26)
+        btn_import.clicked.connect(self._import_json)
+        top.addWidget(btn_import)
+        l.addLayout(top)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -109,6 +123,35 @@ class HomePage(QWidget):
 
     def on_activated(self):
         self.refresh()
+
+    def _export_json(self):
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出抽卡记录", "gacha_export.json", "JSON (*.json)"
+        )
+        if path:
+            from src.storage.exporter import export_to_json
+            account_id = self._main_window.current_account_id if self._main_window else 0
+            try:
+                result = export_to_json(path, account_id=account_id)
+                QMessageBox.information(self, "导出成功", f"已导出到:\n{result}")
+            except Exception as e:
+                QMessageBox.warning(self, "导出失败", str(e))
+
+    def _import_json(self):
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入抽卡记录", "", "JSON (*.json)"
+        )
+        if path:
+            from src.storage.exporter import import_from_json
+            account_id = self._main_window.current_account_id if self._main_window else 0
+            try:
+                count = import_from_json(path, account_id=account_id)
+                QMessageBox.information(self, "导入成功", f"已导入 {count} 条新记录")
+                self.refresh()
+            except Exception as e:
+                QMessageBox.warning(self, "导入失败", str(e))
 
     def refresh(self):
         account_id = self._main_window.current_account_id if self._main_window else 0
