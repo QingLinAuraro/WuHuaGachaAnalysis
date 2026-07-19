@@ -156,6 +156,9 @@ class HomePage(QWidget):
     def refresh(self):
         account_id = self._main_window.current_account_id if self._main_window else 0
         banners, total, total_5, off_count, pool_pity, account_name = _build_timeline(account_id)
+        from loguru import logger
+        logger.info("刷新首页: account_id={}, total={}, 特出={}, 卡池数={}",
+                    account_id, total, total_5, len(banners))
 
         # 先清旧内容（无论是否有数据）
         while self._list.count():
