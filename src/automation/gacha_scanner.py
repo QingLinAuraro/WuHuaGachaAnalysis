@@ -351,6 +351,7 @@ class GachaScanner:
         page_fingerprint = hashlib.md5(
             "|".join(page_names).encode()
         ).hexdigest()[:12]
+        logger.debug("页指纹: {} → 角色: {}", page_fingerprint, page_names[:3])
 
         # 逐行生成记录
         for i in range(9, -1, -1):
