@@ -53,16 +53,7 @@ WuHuaGachaAnalysis/
 └── README.md
 ```
 
-## 快速开始
-
-### 环境要求
-
-- Python 3.11
-- Windows（推荐）/ macOS / Linux
-- ADB (Android Debug Bridge)
-- 模拟器（MuMu / 雷电 / 蓝叠）
-
-### 安装
+## 有编程基础安装
 
 ```bash
 # 克隆仓库
@@ -80,6 +71,11 @@ pip install -r requirements.txt
 # 启动应用（数据库自动创建，无需配置）
 python -m src.main
 ```
+## 无编程基础安装
+
+1. 在当前界面右侧找到Release中的最新版本，点击进入
+2. 进入后在Assets中找到对应的.zip文件下载，下载后解压
+3. 进入解压后的文件夹，点击.exe文件运行，会自动下载需求文件等，请耐心等待
 
 ### 使用说明
 
