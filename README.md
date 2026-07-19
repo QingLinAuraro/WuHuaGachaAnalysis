@@ -16,7 +16,7 @@
 ## 快速开始（无需编程基础）
 
 1. 前往 [Releases](https://github.com/QingLinAuraro/WuHuaGachaAnalysis/releases) 页面
-2. 下载最新的 `WuHuaGachaAnalysis-便携版-*.zip`
+2. 下载最新的 `WuHuaGachaAnalysis-V*.zip`
 3. 解压到任意目录
 4. 双击 `物华弥新抽卡分析器.exe`
 5. 程序自动检查更新 → 安装依赖 → 启动 GUI
