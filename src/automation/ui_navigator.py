@@ -31,6 +31,7 @@ from src.automation.page_graph import (
     get_page,
 )
 from src.automation.button import Button
+from src.automation.resolution import ResolutionAdapter
 from src.automation.errors import (
     NavigationError,
     GameStuckError,
@@ -81,6 +82,7 @@ class UINavigator:
         adb: ADBClient,
         screenshot: Screenshot,
         detector: PageDetector,
+        resolution: Optional[ResolutionAdapter] = None,
         width: int = 1280,
         height: int = 720,
     ) -> None:
@@ -91,6 +93,9 @@ class UINavigator:
         self._height = height
         self._state = NavState.IDLE
         self._coords = self._get_coords()
+
+        # 分辨率适配器（首次截图时自动检测实际分辨率）
+        self._res = resolution or ResolutionAdapter()
 
         # 构建页面图
         self._page_graph = PageGraph()
@@ -114,37 +119,36 @@ class UINavigator:
     # ── 截图 & 点击回调 ───────────────────────────────
 
     def _safe_screenshot(self) -> Optional[np.ndarray]:
-        """安全截图回调"""
+        """安全截图回调（返回 1280×720 设计分辨率图像）"""
         try:
-            return self._screenshot.capture_as_array()
+            img = self._screenshot.capture_as_array()
+            if img is not None:
+                h, w = img.shape[:2]
+                logger.debug("原始截图: {}x{}", w, h)
+                img = self._res.resize_screenshot(img)
+            return img
         except Exception as e:
             logger.error("截图失败: {}", e)
             return None
 
     def _safe_click(self, x: int, y: int) -> bool:
-        """安全点击回调"""
+        """安全点击回调（1280×720 坐标 → 实际屏幕坐标）"""
         try:
-            return self._adb.click(x, y)
+            real_x, real_y = self._res.to_real(x, y)
+            return self._adb.click(real_x, real_y)
         except Exception as e:
             logger.error("点击失败: {}", e)
             return False
 
-    # ── 坐标管理（向后兼容）──────────────────────────
+    # ── 坐标管理（所有坐标基于 1280×720 设计分辨率）──
 
     def _get_coords(self) -> dict:
-        """根据分辨率选择内置的坐标映射"""
-        if self._width == 1920 and self._height == 1080:
-            return dict(self.COORDS_1920x1080)
+        """返回 1280×720 设计分辨率下的预设坐标"""
         return dict(self.COORDS_1280x720)
 
     def _coord(self, key: str) -> tuple[int, int]:
-        """获取坐标，已按分辨率缩放"""
-        base_w, base_h = 1280, 720
-        x, y = self._coords.get(key, (0, 0))
-        if self._width != base_w or self._height != base_h:
-            x = int(x * self._width / base_w)
-            y = int(y * self._height / base_h)
-        return x, y
+        """获取 1280×720 设计分辨率下的坐标（实际屏幕坐标由 _safe_click 转换）"""
+        return self._coords.get(key, (0, 0))
 
     # ── 状态管理 ──────────────────────────────────────
 
@@ -213,7 +217,7 @@ class UINavigator:
             return False
 
     def _fallback_coord_navigation(self) -> bool:
-        """坐标盲操作导航（旧版兼容）"""
+        """坐标盲操作导航（旧版兼容，坐标已由 adapter 缩放）"""
         max_retries = 5
 
         for attempt in range(max_retries):
@@ -231,13 +235,13 @@ class UINavigator:
                 return True
 
             if current_page in (GamePage.MAIN, GamePage.GACHA_ENTRANCE):
-                x, y = self._coord("gacha_button")
+                x, y = self._res.to_real(*self._coord("gacha_button"))
                 logger.info("坐标点击: 招集 ({}, {})", x, y)
                 self._adb.click(x, y)
                 time.sleep(2)
 
             elif current_page == GamePage.GACHA_HOME:
-                x, y = self._coord("record_button")
+                x, y = self._res.to_real(*self._coord("record_button"))
                 logger.info("坐标点击: 召集记录 ({}, {})", x, y)
                 self._adb.click(x, y)
                 time.sleep(2)
@@ -246,9 +250,9 @@ class UINavigator:
                 # UNKNOWN — 尝试盲点
                 logger.info("盲操作: 点击招集 + 召集记录")
                 if attempt < 3:
-                    self._adb.click(*self._coord("gacha_button"))
+                    self._adb.click(*self._res.to_real(*self._coord("gacha_button")))
                     time.sleep(2)
-                    self._adb.click(*self._coord("record_button"))
+                    self._adb.click(*self._res.to_real(*self._coord("record_button")))
                     time.sleep(2)
                 else:
                     break
@@ -306,14 +310,15 @@ class UINavigator:
                 time.sleep(0.5)
                 continue
 
-            # 2. 点击
+            # 2. 点击（1280×720 坐标 → 实际屏幕坐标）
             click_pos = self._get_click_position(screenshot, button)
+            real_x, real_y = self._res.to_real(*click_pos)
             logger.info(
                 "点击 '{}' @ ({}, {}) (尝试 {}/{})",
-                button.name, click_pos[0], click_pos[1],
+                button.name, real_x, real_y,
                 attempt + 1, max_retries,
             )
-            self._adb.click(*click_pos)
+            self._adb.click(real_x, real_y)
 
             # 3. 等待并验证到达
             start = time.time()
@@ -370,8 +375,9 @@ class UINavigator:
 
         if self._popup_close_btn.appear(screenshot):
             pos = self._popup_close_btn.coord()
-            logger.info("点击关闭弹窗 @ ({}, {})", pos[0], pos[1])
-            self._adb.click(*pos)
+            real_pos = self._res.to_real(*pos)
+            logger.info("点击关闭弹窗 @ ({}, {})", real_pos[0], real_pos[1])
+            self._adb.click(*real_pos)
             return True
 
         # 回退：尝试按返回键

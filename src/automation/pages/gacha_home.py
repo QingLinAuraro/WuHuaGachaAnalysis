@@ -4,6 +4,7 @@ from src.config import config
 from src.automation.button import Button
 
 _ROOT = config.resource_root
+_THRESHOLD = config.get("automation.image_recognition.template_threshold", 0.8)
 
 
 # 页面识别
@@ -11,6 +12,7 @@ CHECK_GACHA_HOME = Button(
     area=(939, 71, 1094, 129),
     button=(939, 71, 1094, 129),
     file=str(_ROOT / "assets" / "templates" / "gacha" / "details.png"),
+    similarity=_THRESHOLD,
     name="CHECK_GACHA_HOME",
 )
 
@@ -19,6 +21,7 @@ BTN_DETAILS = Button(
     area=(939, 71, 1094, 129),
     button=(939, 71, 1094, 129),
     file=str(_ROOT / "assets" / "templates" / "gacha" / "details.png"),
+    similarity=_THRESHOLD,
     name="DETAILS",
 )
 
@@ -27,5 +30,6 @@ BTN_BACK1 = Button(
     area=(5, 4, 204, 60),
     button=(5, 4, 204, 60),
     file=str(_ROOT / "assets" / "templates" / "gacha" / "back1.png"),
+    similarity=_THRESHOLD,
     name="BACK1_TO_MAIN",
 )

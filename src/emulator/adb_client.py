@@ -8,6 +8,7 @@ ADB 客户端（增强版）
   - 点击历史追踪          : 防重复点击 + 卡住检测
 """
 
+import os
 import subprocess
 import re
 import time

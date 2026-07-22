@@ -65,41 +65,43 @@ class PageDetector:
     def _load_templates(self) -> None:
         """从 assets/templates/ 自动加载页面 check_button 和导航按钮
 
-        目录结构（ALAS 风格）：
+        目录结构（ALAS 风格，支持嵌套）：
           assets/templates/
             main/
-              assemble.png       # 页面识别
-              gacha_button.png    # 导航点击
-            assemble/
-              assemble.png
-              record_button.png
-            gacha_record/
-              assemble.png
-              next_page.png
-            shared/
-              back.png / close.png / confirm.png
+              gacha.png           # 页面识别 + 导航
+            gacha/
+              details.png / back1.png
+              details/
+                record.png / back.png
+                record/
+                  page_up.png / page_down.png / final_page.png / select.png / pool.png / back.png
         """
         if not self._templates_dir.exists():
             logger.warning("模板目录不存在: {}", self._templates_dir)
             logger.warning("请放置模板图片后重启程序")
-            logger.warning("目录结构应为: assets/templates/{page_name}/assemble.png")
+            logger.warning("目录结构应为: assets/templates/{page_name}/*.png")
             return
 
-        for page_dir in self._templates_dir.iterdir():
-            if not page_dir.is_dir():
+        # 递归扫描所有包含 .png 文件的子目录
+        scanned_dirs = set()
+        for img_file in self._templates_dir.rglob("*.png"):
+            page_dir = img_file.parent
+            if page_dir in scanned_dirs:
+                continue
+            scanned_dirs.add(page_dir)
+
+            # 用相对于 templates_dir 的路径作为 page_name（如 "gacha/details/record"）
+            page_name = str(page_dir.relative_to(self._templates_dir)).replace("\\", "/")
+            if page_name == "shared" or "shared" in page_name.split("/"):
                 continue
 
-            page_name = page_dir.name
-            if page_name == "shared":
-                continue  # shared 目录的是通用按钮，不是页面检测用
-
             buttons: list[Button] = []
-            for img_file in page_dir.glob("*.png"):
+            for png in page_dir.glob("*.png"):
                 btn = Button(
                     area=(0, 0, 1280, 720),  # 默认全图搜索
-                    file=str(img_file),
+                    file=str(png),
                     similarity=self._threshold,
-                    name=f"check_{page_name}_{img_file.stem}",
+                    name=f"check_{page_name}_{png.stem}",
                 )
                 buttons.append(btn)
 
@@ -227,12 +229,23 @@ class PageDetector:
 
     @staticmethod
     def _page_name_to_enum(name: str) -> GamePage:
-        """将页面目录名映射到 GamePage 枚举"""
+        """将页面目录名（相对路径）映射到 GamePage 枚举"""
+        # 支持递归目录路径，如 "gacha/details/record" → GACHA_RECORD
         mapping = {
             "main": GamePage.MAIN,
             "gacha": GamePage.GACHA_HOME,
+            "gacha/details": GamePage.GACHA_DETAIL,
+            "gacha/details/record": GamePage.GACHA_RECORD,
         }
-        return mapping.get(name, GamePage.UNKNOWN)
+        # 也兼容简短名称（旧版或别名）
+        short_mapping = {
+            "gacha_entrance": GamePage.GACHA_ENTRANCE,
+            "gacha_record": GamePage.GACHA_RECORD,
+            "gacha_detail": GamePage.GACHA_DETAIL,
+        }
+        if name in mapping:
+            return mapping[name]
+        return short_mapping.get(name, GamePage.UNKNOWN)
 
     @staticmethod
     def page_enum_to_name(page: GamePage) -> str:

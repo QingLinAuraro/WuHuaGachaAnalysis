@@ -30,6 +30,7 @@ from src.emulator.screenshot import Screenshot
 from src.automation.ui_navigator import UINavigator, NavState
 from src.automation.page_detector import PageDetector, GamePage
 from src.automation.button import Button
+from src.automation.resolution import ResolutionAdapter
 from src.automation.errors import (
     GameStuckError,
     NavigationError,
@@ -74,10 +75,14 @@ class GachaScanner:
         self._screenshot = screenshot
         self._detector = detector
 
+        screen_w, screen_h = adb.get_screen_size()
+        self._res = ResolutionAdapter()  # 首次截图时自动检测实际分辨率
+
         self._navigator = UINavigator(
             adb, screenshot, detector,
-            width=adb.get_screen_size()[0],
-            height=adb.get_screen_size()[1],
+            resolution=self._res,
+            width=screen_w,
+            height=screen_h,
         )
 
         self._ocr = get_ocr_engine()
@@ -292,16 +297,31 @@ class GachaScanner:
         return self._records
 
     def _goto_last_page(self) -> bool:
-        """点击末尾页按钮，一键跳转到最后一页"""
+        """点击末尾页按钮，一键跳转到最后一页，并验证内容变化"""
         if not self._is_running:
             return False
         img = self._capture_screenshot()
         if img is None:
             return False
+        # 记录点击前的内容区域
+        before_area = self._extract_record_area(img)
+
         click_pos = self._find_final_button(img)
-        self._adb.click(*click_pos)
-        time.sleep(0.8)
-        logger.info("已跳转到末尾页")
+        self._adb.click(*self._res.to_real(*click_pos))
+
+        # 等待页面跳转完成（跳转到末页可能有多页，需要更长等待）
+        time.sleep(self._page_delay)
+
+        # 验证内容确实变化了
+        after_img = self._capture_screenshot()
+        if after_img is not None:
+            after_area = self._extract_record_area(after_img)
+            if self._content_changed(before_area, after_area):
+                logger.info("已跳转到末尾页（内容已变化）")
+            else:
+                logger.warning("跳转末尾页后内容未变化，可能已在末页或点击未生效")
+        else:
+            logger.info("已跳转到末尾页")
         return True
 
     def _find_final_button(self, img: np.ndarray) -> tuple[int, int]:
@@ -393,6 +413,8 @@ class GachaScanner:
         img = self._adb.screenshot_validate()
         if img is None:
             img = self._screenshot.capture_as_array()
+        if img is not None:
+            img = self._res.resize_screenshot(img)
         return img
 
     # ── 翻页 ──────────────────────────────────────────
@@ -400,8 +422,8 @@ class GachaScanner:
     def _prev_page(self, before_img: np.ndarray) -> bool:
         before_area = self._extract_record_area(before_img)
         click_pos = self._find_prev_button(before_img)
-        self._adb.click(*click_pos)
-        time.sleep(1.0)
+        self._adb.click(*self._res.to_real(*click_pos))
+        time.sleep(self._page_delay)
         after_img = self._capture_screenshot()
         if after_img is None:
             return False
