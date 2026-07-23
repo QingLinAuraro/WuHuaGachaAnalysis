@@ -180,6 +180,9 @@ class GachaScanner:
                     len(existing_ids))
         logger.info("=" * 60)
 
+        # 0. 预热 OCR 引擎（首次加载模型到文件缓存，避免首页超时）
+        self._ocr.warmup()
+
         # 1. 导航到召集记录页
         if not self._is_running:
             return []
@@ -352,6 +355,15 @@ class GachaScanner:
         except Exception as e:
             logger.error("批量 OCR 异常: {}", e)
             return records
+
+        # 如果 OCR 全部返回空（可能是子进程超时），重试一次
+        if all(not r for r in all_results):
+            logger.warning("OCR 返回全空结果，可能是子进程超时，重试一次...")
+            try:
+                all_results = self._ocr.recognize_page(img_cropped, regions_y)
+            except Exception as e:
+                logger.error("OCR 重试失败: {}", e)
+                return records
 
         # 先收集所有行纠错后的角色名，做页指纹
         page_names: list[str] = []
