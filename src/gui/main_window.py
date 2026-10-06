@@ -680,7 +680,7 @@ class MainWindow(QMainWindow):
 
         self._scanner = create_scanner(self._adb)
         self._scanner.set_account(self._current_account_id)
-        self._scanner.set_banner("活动招募", BannerType.EVENT)
+        self._scanner.set_banner("", BannerType.UNKNOWN)
 
         sig = self._signals
         self._scanner.on_progress(lambda cur, total, info: sig.log_msg.emit(f"[进度] {info}"))

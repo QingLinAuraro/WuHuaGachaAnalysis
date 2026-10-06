@@ -74,7 +74,7 @@ class PageDetector:
               details/
                 record.png / back.png
                 record/
-                  page_up.png / page_down.png / final_page.png / select.png / pool.png / back.png
+                  page_up.png / page_down.png / select.png / pool.png / back.png
         """
         if not self._templates_dir.exists():
             logger.warning("模板目录不存在: {}", self._templates_dir)
@@ -98,7 +98,7 @@ class PageDetector:
             buttons: list[Button] = []
             for png in page_dir.glob("*.png"):
                 btn = Button(
-                    area=(0, 0, 1280, 720),  # 默认全图搜索
+                    area=(0, 0, 1280, 720),  # 默认全图搜索 (x, y, w, h)
                     file=str(png),
                     similarity=self._threshold,
                     name=f"check_{page_name}_{png.stem}",

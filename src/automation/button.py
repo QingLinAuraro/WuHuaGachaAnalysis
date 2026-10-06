@@ -168,11 +168,24 @@ def load_image(file_path: str, area: Optional[tuple[int, int, int, int]] = None)
     return img
 
 
+def xywh_to_xyxy(
+    box: tuple[int, int, int, int],
+) -> tuple[int, int, int, int]:
+    """(x, y, w, h) → (x1, y1, x2, y2)
+
+    项目对外统一使用 xywh 坐标：
+      x, y = 左上角；w 向右延伸，h 向下延伸。
+    内部裁剪/取色/匹配沿用 xyxy 语义，故在 Button 入口处一次性转换。
+    """
+    x, y, w, h = box
+    return (x, y, x + w, y + h)
+
+
 def area_offset(
     area: tuple[int, int, int, int],
     offset: tuple[int, int],
 ) -> tuple[int, int, int, int]:
-    """平移区域"""
+    """平移区域（xyxy 语义）"""
     return (
         area[0] + offset[0],
         area[1] + offset[1],
@@ -204,19 +217,23 @@ def random_point_in_area(
 class Button:
     """统一按钮对象 — 支持三层识别：颜色 → 模板匹配 → 全图搜索
 
+    坐标统一为 xywh：(x, y) 左上角，w 向右延伸，h 向下延伸。
+
     使用示例:
         # 纯颜色检测按钮
         CHECK_MAIN = Button(
-            area=(100, 200, 200, 240),
+            area=(100, 200, 100, 40),
             color=(255, 200, 100),
-            button=(100, 200, 200, 240),
+            button=(100, 200, 100, 40),
             name="main_check",
         )
 
         # 模板匹配按钮
+        # 注意：area 必须比模板大一圈，给 matchTemplate 留位移容错，
+        #       否则结果矩阵退化为 1×1，轻微抖动就会匹配失败。
         NEXT_PAGE = Button(
-            area=(1100, 600, 1280, 700),
-            button=(1100, 600, 1280, 700),
+            area=(1100, 600, 180, 100),
+            button=(1100, 600, 180, 100),
             file="assets/templates/gacha_record/next_page.png",
             similarity=0.8,
             name="next_page",
@@ -239,16 +256,20 @@ class Button:
     ):
         """
         Args:
-            area: 按钮检测区域 (x1, y1, x2, y2)
+            area: 按钮检测区域 (x, y, w, h) — w 向右、h 向下
             color: 期望颜色 (r, g, b)，None 表示不用颜色检测
-            button: 可点击区域 (x1, y1, x2, y2)，默认与 area 相同
+            button: 可点击区域 (x, y, w, h)，默认与 area 相同
             file: 模板图片路径，None 表示不用模板匹配
             similarity: 模板匹配阈值
             name: 按钮名称（用于日志）
+
+        Note:
+            area / button 对外以 xywh 传入，内部统一存为 xyxy，
+            因此 crop / get_color / area_offset / 匹配坐标反算等逻辑无需感知格式。
         """
-        self.area = area
+        self.area = xywh_to_xyxy(area)
         self.color = color
-        self.button = button if button is not None else area
+        self.button = xywh_to_xyxy(button) if button is not None else self.area
         self.file = file
         self.similarity = similarity
         self.name = name
@@ -488,14 +509,19 @@ class Button:
         image: Optional[np.ndarray] = None,
         name: Optional[str] = None,
     ) -> "Button":
-        """基于相对坐标创建子按钮"""
+        """基于相对坐标创建子按钮
+
+        Args:
+            area: 相对本按钮的 (x, y, w, h)
+        """
         name = name or self.name
-        new_area = area_offset(area, offset=self.area[:2])
-        new_button = area_offset(area, offset=self.button[:2])
-        btn = Button(
+        x, y, w, h = area
+        new_area = area_offset((x, y, x + w, y + h), offset=self.area[:2])
+        new_button = area_offset((x, y, x + w, y + h), offset=self.button[:2])
+        btn = Button._from_xyxy(
             area=new_area,
-            color=self.color,
             button=new_button,
+            color=self.color,
             file=self.file,
             similarity=self.similarity,
             name=name,
@@ -509,14 +535,42 @@ class Button:
     ) -> "Button":
         """平移按钮"""
         name = name or self.name
-        return Button(
+        return Button._from_xyxy(
             area=area_offset(self.area, vector),
-            color=self.color,
             button=area_offset(self.button, vector),
+            color=self.color,
             file=self.file,
             similarity=self.similarity,
             name=name,
         )
+
+    @classmethod
+    def _from_xyxy(
+        cls,
+        area: tuple[int, int, int, int],
+        button: Optional[tuple[int, int, int, int]] = None,
+        color: Optional[tuple[int, int, int]] = None,
+        file: Optional[str] = None,
+        similarity: float = 0.85,
+        name: str = "BUTTON",
+    ) -> "Button":
+        """内部构造：直接使用 xyxy 坐标，跳过 xywh 转换。
+
+        仅供 crop_button / move_button 等派生场景使用，
+        这些场景的坐标已经由内部 xyxy 运算得出。
+        """
+        btn = cls.__new__(cls)
+        btn.area = area
+        btn.color = color
+        btn.button = button if button is not None else area
+        btn.file = file
+        btn.similarity = similarity
+        btn.name = name
+        btn._template = None
+        btn._template_loaded = False
+        btn._match_point = None
+        btn._match_score = 0.0
+        return btn
 
 
 # ═══════════════════════════════════════════════════════════
@@ -556,8 +610,8 @@ class ButtonGrid:
 
     def __getitem__(self, item: tuple[int, int]) -> Button:
         base = np.round(np.array(item) * self.delta + self.origin).astype(int)
-        area = tuple(np.append(base, base + self.button_shape))
-        return Button(
+        area = tuple(int(v) for v in np.append(base, base + self.button_shape))
+        return Button._from_xyxy(
             area=area,
             button=area,
             name=f"{self.name}_{item[0]}_{item[1]}",

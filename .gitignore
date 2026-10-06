@@ -219,8 +219,8 @@ __marimo__/
 
 # Project specific
 logs/
-screenshots/*.png
-!screenshots/_*.png
+# screenshots/ 是运行时截图目录（config: adb.screenshot_dir），整目录不入仓库
+screenshots/
 .idea/
 .vscode/
 *.db
@@ -239,10 +239,9 @@ build_portable.py
 # Export files
 gacha_export*.json
 
-# Root screenshots (only allow template images in assets/)
+# Root files: 仅允许 assets/ 下的模板图入库
 *.png
 !assets/**/*.png
-!screenshots/_*.png
 
 # 便携打包 — 自包含运行时
 /toolkit/
@@ -263,3 +262,18 @@ gacha_export*.json
 实现内容.docx
 ~实现内容.docx
 控制台.bat
+
+# === AI 协作工作区（本地记忆 / 备份 / 临时产物，不入仓库）===
+.workbuddy/
+
+# === 本地开发辅助 ===
+# 临时脚本（根目录下 wh_*.py / tmp_*.py 等一次性调试脚本）
+/wh_*.py
+/tmp_*.py
+/tempCodeRunnerFile.py
+
+# IDE
+*.iml
+*.iws
+*.ipr
+out/

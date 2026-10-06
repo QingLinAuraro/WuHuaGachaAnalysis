@@ -66,6 +66,16 @@ class GachaRecordParser:
         "新生": Rarity.FINE,
     }
 
+    # 招集栏 "{类型}/" 前缀 → BannerType
+    # 顺序即匹配优先级；前缀为空时另按赛季处理（见 _extract_banner_from_text）
+    _BANNER_TYPE_PREFIX = (
+        ("限时", BannerType.LIMITED_TIME),
+        ("限定", BannerType.LIMITED),
+        ("招集", BannerType.SUMMON),
+        ("征集", BannerType.COLLECT),
+        ("赛季", BannerType.SEASON),
+    )
+
     def _load_name_dict(self) -> None:
         """加载器者名称和卡池名称词库，同时构建名称→稀有度映射"""
         names_path = config.resource_root / "config" / "names.yaml"
@@ -200,7 +210,10 @@ class GachaRecordParser:
         banner_from_ocr, pool_type = self._extract_banner_from_text(banner_str)
         if banner_from_ocr:
             self.banner_name = banner_from_ocr
-            self.banner_type = pool_type or BannerType.EVENT
+            if pool_type is not None:
+                # 只有识别出类型才覆盖；识别不出时保留 set_banner() 传入的类型，
+                # 不静默兜底成某个具体分类
+                self.banner_type = pool_type
 
         if not character_name:
             logger.debug("列解析失败 - 器者=[{}]", name_str)
@@ -219,11 +232,17 @@ class GachaRecordParser:
         )
 
     def _extract_banner_from_text(self, text: str) -> tuple:
-        """从卡池列合并文本中提取 (卡池名称, 池类型)
-        
+        """从招集列文本中提取 (卡池名称, 池类型)
+
+        游戏格式为 "{类型}/{卡池名}"：
+            限定/万嶂烟峦  → ("万嶂烟峦", 限定)
+            限时/至乐如真  → ("至乐如真", 限时)
+            招集/xxx      → ("xxx", 招集)
+            征集/器者征集  → ("器者征集", 征集)
+            /孤岛螺旋      → ("孤岛螺旋", 赛季)   # 类型栏为空
+
         Returns:
-            (banner_name, pool_type) 或 (None, None)
-            pool_type: '限时' / '限定' / None
+            (banner_name, pool_type)；文本里没有类型信息时 pool_type 为 None
         """
         text = text.strip()
         if not text:
@@ -232,23 +251,27 @@ class GachaRecordParser:
         pool_type = None
         raw_name = text
 
-        if "/" in text and len(text) >= 3:
-            parts = text.split("/", 1)
-            prefix = parts[0].strip()
-            raw_name = parts[1].strip() if len(parts) > 1 else text
-            if "限时" in prefix:
-                pool_type = BannerType.LIMITED_TIME
-            elif "限定" in prefix:
-                pool_type = BannerType.LIMITED
-        elif text.startswith(("限时", "限定")) and len(text) > 2:
-            if text.startswith("限时"):
-                pool_type = BannerType.LIMITED_TIME
-            else:
-                pool_type = BannerType.LIMITED
-            raw_name = text[2:].strip()
+        if "/" in text:
+            prefix, _, name = text.partition("/")
+            prefix = prefix.strip()
+            name = name.strip()
+            if name:
+                raw_name = name
+                if prefix:
+                    for keyword, banner_type in self._BANNER_TYPE_PREFIX:
+                        if keyword in prefix:
+                            pool_type = banner_type
+                            break
+                else:
+                    # 类型栏为空 —— 目前只有赛季渠道会这样
+                    pool_type = BannerType.SEASON
         else:
-            # 纯卡池名，尝试词库匹配
-            pass
+            # 无分隔符：尝试识别开头的类型关键词，如 "限时xxx"
+            for keyword, banner_type in self._BANNER_TYPE_PREFIX:
+                if text.startswith(keyword) and len(text) > len(keyword):
+                    pool_type = banner_type
+                    raw_name = text[len(keyword):].strip()
+                    break
 
         matched = self._fuzzy_match(raw_name, self._banner_names, threshold=0.5)
         banner_name = matched if matched else raw_name

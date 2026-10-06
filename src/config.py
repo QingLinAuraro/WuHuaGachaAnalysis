@@ -142,6 +142,20 @@ class Config:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    @property
+    def database_path(self) -> Path:
+        """数据库文件的绝对路径
+
+        database.path 历史上被写成过相对路径（data/gacha.db），
+        SQLAlchemy 会按"进程当前目录"解析 → 换个启动方式就读写到另一个（空的）库，
+        界面上总抽数直接归零。这里一律按 data_root 解析成绝对路径。
+        """
+        raw = self.get("database.path", "")
+        p = Path(raw) if raw else Path("data") / "gacha.db"
+        if not p.is_absolute():
+            p = self._data_root / p
+        return p
+
     def get(self, key: str, default: Any = None) -> Any:
         """获取配置项，支持点分隔的路径如 'adb.path'"""
         keys = key.split(".")

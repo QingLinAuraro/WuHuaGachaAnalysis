@@ -16,8 +16,8 @@ automation:
     min_width: 640
     navigation_timeout: 30
     template_threshold: 0.8
-database:
-  path: data/gacha.db
+# database.path 不在这里写：写相对路径会按启动时的 CWD 解析，换个启动方式就换了库。
+# 默认由 src/config.py 的 database_path 给出绝对路径（<数据目录>/data/gacha.db）。
 gacha:
   scan_page_delay: 2.0
 gui:
