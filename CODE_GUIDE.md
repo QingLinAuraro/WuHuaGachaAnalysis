@@ -748,7 +748,8 @@ src/automation/
     ├── main.py            主页按钮
     ├── gacha_home.py      招集主页按钮
     ├── gacha_details.py   概率详情按钮
-    └── gacha_record.py    召集记录按钮
+    ├── gacha_record.py    召集记录按钮
+    └── gacha_channel.py   渠道切换面板（5 个渠道条目）
 ```
 
 ### 5.2 `button.py` — Button 统一识别对象 (参照 ALAS 框架)
@@ -837,12 +838,56 @@ pages/gacha_record.py (召集记录页)
 ├── CHECK_GACHA_RECORD  area=(395, 553, 695, 67)   ← 覆盖翻页栏漂移范围
 ├── BTN_PAGE_UP         area=(395, 553, 335, 67)   button=(413, 561, 106, 50)  ← "上一页"
 ├── BTN_PAGE_DOWN       area=(750, 553, 340, 67)   button=(962, 564, 108, 43)  ← "下一页"
-├── BTN_SELECT          area=(1182, 131, 49, 45)   ← 选择卡池
-├── BTN_CHANGE_POOLS    area=(1051, 175, 177, 47)  ← 切换卡池
+├── BTN_SELECT          area=(1185, 137, 46, 38)   ← 展开渠道选择面板（下拉箭头，紧贴框）
 └── BTN_BACK            area=(522, 638, 247, 56)
+
+pages/gacha_channel.py (渠道切换面板)
+├── CHANNEL_PANEL_AREA  = (1048, 175, 185, 235)    ← 面板展开后的整块列表区域
+├── CHANNEL_ORDER       = (限时, 限定, 招集, 征集, 赛季)   ← 面板内自上而下
+├── CHANNEL_BUTTONS     = {类型: Button}           ← 每个类型一个条目模板
+│   └── area 全部用 CHANNEL_PANEL_AREA，match() 在区域内搜索对应条目模板
+│       限时=xianshi.png  限定=xianding.png  招集=zhaoji.png
+│       征集=zhengji.png  赛季=saiji.png
+├── find_visible_channels(img) → [类型, ...]        ← 面板里"未选中态"的条目，自上而下
+└── channel_by_elimination(visible) → 类型 | UNKNOWN ← 排除法猜当前选中渠道
 ```
 
-**⚠️ 模板匹配的 area 必须比模板大一圈**
+**⚠️ 渠道条目模板是"未选中态"**
+
+面板展开时，**当前渠道**处于选中态（浅色高亮底 + 绿勾），与未选中态模板差异很大，
+拿它自己的模板去反查会失配。实测：截图里「限时渠道」选中时，
+用 `xianshi.png` 匹配得到 **0.891**，且最佳位置落在「**限定渠道**」上（张冠李戴）。
+
+由此可以反推出一条规律，`find_visible_channels()` 就建立在它上面：
+
+| 面板里的条目 | 匹配模板 | 含义 |
+| --- | --- | --- |
+| 未选中态（深色底、无勾） | 匹配得到（实测 0.988 ~ 0.990） | 可切换的目标 |
+| 选中态（浅色高亮底 + 绿勾） | 匹配不到 | 当前正在看的渠道 |
+
+- **切换渠道**：只对目标渠道匹配。目标必然是未选中态（当前选中的那个刚扫完、已进已扫集合），
+  所以不会踩坑 —— 实测 4 个未选中条目的得分 0.988 ~ 0.990，点击位置全部准确。
+- **点错行的防护**：`find_visible_channels()` 按得分从高到低收录，中心 y 相差 ≤ 20px 的只留高分那个。
+  不加这一步，上面那个 0.891 的张冠李戴会让「限时」和「限定」各占一条，
+  面板条目数被算多 1 个，"全部扫完"的判定就永远到不了。
+- **识别"当前是哪个渠道"**：首选用 OCR（`GachaScanner._detect_channel`，记录内容里带类型）；
+  OCR 认不出类型时，再用 `channel_by_elimination()` 兜底 —— 面板里恰好少一个就是它。
+  **但不要在能走 OCR 时改用排除法**：账号没开通全部渠道类型时，剩下好几个，判断不出来。
+
+**⚠️ 扫描渠道总数以"展开后显示的条目"为准**
+
+`gacha.auto_switch_channel = true` 时，每扫完一个渠道就把面板展开一次，
+用 `find_visible_channels()` 数出面板上实际有几条，再算总数：
+
+```
+total_channels = len(set(visible) | {当前渠道})     # 当前选中那条匹配不上，单独补进来
+```
+
+不能写死成 5（`CHANNEL_ORDER` 的长度）—— 账号可能只开通了其中几个，
+游戏以后也可能再加渠道类型。终止条件为 `len(scanned_channels) >= total_channels`；
+另外还有一道保险：面板里已经挑不出"没扫过"的条目时也停。
+
+**⚠️ 模板匹配的 area 必须比模板大一圈（展开按钮是唯一的例外）**
 
 `_appear_by_template()` 走的是 `cv2.matchTemplate(crop(image, area), template, TM_CCOEFF_NORMED)`。
 结果矩阵尺寸 = `(H_area - h_tpl + 1, W_area - w_tpl + 1)`。
@@ -852,7 +897,20 @@ pages/gacha_record.py (召集记录页)
 实测：同一画面下，零位移得分 0.99；仅平移 5px 后，精确 area 掉到 **0.775**（低于 0.8 阈值 → 失败），
 而 `area` 外扩 20px 后依然 **0.99**。
 
-定义新按钮时，`area` 请在模板外包一圈余量（建议上下左右各 15~25px），不要直接量模板的紧边框。
+**更隐蔽的翻车方式：搜索区比模板还小。** `_appear_by_template` 里有
+`if search_region.shape < template.shape: return False` —— 高度或宽度差 1px 就永远匹配不上。
+（历史案例：`select.png` 曾是 41×39，而用户给的紧贴框 `(1185,137,46,38)` 只有 38px 高，直接失效。）
+
+**例外：`BTN_SELECT` 故意用了紧贴框**。模板换新后 `select.png` = 46×38，与搜索区
+`(1185, 137, 46, 38)` **尺寸完全相等**，也就是上面说的 1×1 零容错。之所以敢这么用，是因为实测：
+
+- 该点得分 **0.9940**（阈值 0.8），余量极大；
+- 左/右移 20px、上/下移 15px 后得分全部 **≤ 0.0059** —— 唯一性极好，不存在"差几像素就匹配到别处"的风险；
+- **不放大**才使它（y 137~175）与下方渠道面板（y 175~410）完全不重叠。
+  早前外扩成 `(1175, 127, 62, 56)` 时，y 会伸到 183px，与面板顶部交叠。
+
+所以：一般按钮请在模板外包一圈余量（建议上下左右各 15~25px）；
+只有在"模板稳定、位置固定、且外扩会引入干扰区域"时才考虑紧贴框，并且必须实测周边平移得分来证明唯一性。
 
 ⚠️ **坐标基准**：全部基于 1280×720 分辨率，非此分辨率的模拟器需要缩放（`UINavigator._coord()` 有缩放逻辑，但 Page 图中的 Button 直接使用原始坐标，未做缩放适配）。
 
@@ -1023,8 +1081,13 @@ GachaScanner
 │   ├─ L79  获取屏幕尺寸 → self._screen_w, self._screen_h
 │   ├─ L83  self._engine = get_ocr_engine()   → engine.py:70（延迟加载）
 │   ├─ L84  self._parser = GachaRecordParser() → parser.py:42（加载词库）
-│   └─ L92  翻页按钮定义（⚠️ 与 pages/gacha_record.py 重复）
-│       └─ _next_page_btn   area=(750, 553, 340, 67)  button=(962, 564, 108, 43)  # 只向前翻页
+│   ├─ L92  翻页按钮定义（⚠️ 与 pages/gacha_record.py 重复）
+│   │   └─ _next_page_btn   area=(750, 553, 340, 67)  button=(962, 564, 108, 43)  # 只向前翻页
+│   └─ L109 渠道切换相关
+│       ├─ _expand_channel_btn = pages/gacha_record.py 的 BTN_SELECT（下拉箭头）
+│       ├─ _panel_delay        = config: gacha.channel_panel_delay（面板弹出等待）
+│       ├─ _max_pages          = config: gacha.max_pages_per_channel
+│       └─ _action_interval    = config: automation.image_recognition.action_interval
 │
 ├─ 回调设置
 │   ├─ on_progress(msg)       L128  → UI 进度日志
@@ -1047,24 +1110,59 @@ GachaScanner
 │   ├─ 导航阶段
 │   │   └─ navigator.go_to_gacha_records() → ui_navigator（识别不出页面就放弃，不盲点）
 │   │
-│   ├─ 逐页扫描循环 (while _is_running and page <= 500)：从第 1 页向后读到末页
-│   │   ├─ _capture_screenshot() → 获取当前页截图
-│   │   │   └─ → adb.screenshot_validate() → screenshot.capture_as_array() 回退
+│   ├─ ⭐ 逐渠道扫描（外层循环 while _is_running）
 │   │   │
-│   │   ├─ _scan_page(img) → 解析当前页所有记录
-│   │   │   └─ 详见下方 _scan_page 详解
+│   │   ├─ 内层：逐页扫描循环 (while _is_running and page <= _max_pages)
+│   │   │   ├─ _capture_screenshot() → 获取当前页截图
+│   │   │   │   └─ → adb.screenshot_validate() → screenshot.capture_as_array() 回退
+│   │   │   │
+│   │   │   ├─ _scan_page(img) → 解析当前页所有记录
+│   │   │   │   └─ 详见下方 _scan_page 详解
+│   │   │   │
+│   │   │   ├─ 第 1 页时 _detect_channel(records) → 核对"当前是哪个渠道"
+│   │   │   │   切换成功后已有权威值（就是点进去的那个），OCR 只用来复核：
+│   │   │   │   万一点错了条目，以页面实际内容为准（否则会把没扫过的渠道记成已扫）
+│   │   │   │
+│   │   │   ├─ 逐条补齐 banner_name / banner_type / account_id，暂存到 new_records
+│   │   │   │
+│   │   │   ├─ _next_page(img) → 点"下一页" + 像素差分判断是否真翻页
+│   │   │   │   ├─ 匹配不到"下一页"按钮：
+│   │   │   │   │   ├─ 仍能认出召集记录页 → 判定末页，正常结束
+│   │   │   │   │   └─ 所有页面模板都匹配不上 → _abort_reason 置位 + 安全停机
+│   │   │   │   └─ 内容未变化 → 退出内层循环（本渠道已到末页）
+│   │   │   │
+│   │   │   └─ 内层结束
 │   │   │
-│   │   ├─ 逐条补齐 banner_name / banner_type / account_id，暂存到 new_records
+│   │   ├─ scanned_channels.add(当前渠道)
 │   │   │
-│   │   ├─ _next_page(img) → 点"下一页" + 像素差分判断是否真翻页
-│   │   │   ├─ 匹配不到"下一页"按钮：
-│   │   │   │   ├─ 仍能认出召集记录页 → 判定末页，正常结束
-│   │   │   │   └─ 所有页面模板都匹配不上 → _abort_reason 置位 + 安全停机
-│   │   │   └─ 内容未变化 → 退出循环（已到末页）
+│   │   ├─ 终止判断 A（满足任一即退出外层）
+│   │   │   ├─ 安全停机 / 用户中断 / 连续截图失败
+│   │   │   └─ config: gacha.auto_switch_channel = false
 │   │   │
-│   │   └─ 循环结束
+│   │   ├─ _open_channel_panel() → 展开面板，返回展开后的截图
+│   │   │   └─ 判定"已展开"靠 find_visible_channels(img) 非空
+│   │   │      （不能靠展开箭头：面板开/关时那支箭头外观一模一样）
+│   │   │
+│   │   ├─ visible = find_visible_channels(img) → 面板里"未选中态"的条目
+│   │   │
+│   │   ├─ 当前渠道仍未知（OCR 失败）→ channel_by_elimination(visible) 兜底
+│   │   │   └─ 恰好剩一个 → 就是它；剩多个 → UNKNOWN（账号没开通那么多类型）
+│   │   │
+│   │   ├─ 终止判断 B
+│   │   │   ├─ 渠道类型仍为 UNKNOWN → 停（否则会反复扫同一个渠道）
+│   │   │   ├─ total_channels = len(set(visible) | {当前渠道})
+│   │   │   │    len(scanned_channels) >= total_channels → 全部完成
+│   │   │   │    ⚠️ 总数以"展开后显示的条目"为准，不写死 CHANNEL_ORDER 的长度
+│   │   │   └─ target = visible 中第一个不在 scanned_channels 的 → 没有则停
+│   │   │
+│   │   └─ _switch_channel(target) → 失败则整体停机（不盲点击）
+│   │       ├─ 截图 → get_channel_button(target).match(img)
+│   │       │   ├─ 匹配不到 → 面板未展开 → 点 _expand_channel_btn，等待后重试
+│   │       │   └─ 匹配到   → 点条目中心 (x + w//2, y + h//2)
+│   │       ├─ 再截图，确认面板已收起（该区域不再匹配到条目）
+│   │       └─ 重试 _max_retries 次仍失败 → 返回 False
 │   │
-│   ├─ 存在性判断 + 编号 + 入库（扫描结束后一次性处理）
+│   ├─ 存在性判断 + 编号 + 入库（全部渠道扫描结束后一次性处理）
 │   │   ├─ ordered = reversed(new_records)  → 旧→新，即内容键的规范顺序
 │   │   ├─ 逐条过滤：pull_time.microsecond != 0 的行（时间未识别）剔除不入库
 │   │   ├─ 分组计数：group_total[key] = 过滤后该内容键的条数
@@ -1125,6 +1223,25 @@ GachaScanner
 │   │   → 保证多次扫描算出一致的"内容键"
 │   │
 │   └─ 返回 records 列表
+│
+├─ ⭐ _detect_channel(records)  L550  从记录推断"当前是哪个渠道"
+│   └─ 取第一条 banner_type 非 UNKNOWN 的记录；全无则返回 UNKNOWN
+│       ⚠️ 不要改用面板模板反查（当前渠道是选中态，会张冠李戴）。
+│          OCR 认不出时由 scan_all 用 channel_by_elimination() 兜底。
+│
+├─ ⭐ _open_channel_panel()     L570  确保渠道面板展开，返回展开后的截图
+│   ├─ 截图 → find_visible_channels(img) 非空 → 已展开，直接返回
+│   ├─ 为空 → 点 _expand_channel_btn → 等待 _panel_delay → 重试
+│   └─ 重试 _max_retries 次仍为空 → None（调用方据此停止自动切换）
+│       ⚠️ 只能靠"面板里出现了渠道条目"判断展开，不能靠展开箭头 ——
+│          实测面板开/关时 select.png 都是 0.9940，箭头外观完全一样
+│
+├─ ⭐ _switch_channel(target)   L609  展开渠道面板并点击目标条目
+│   ├─ 截图 → get_channel_button(target).match(img)
+│   │   ├─ 匹配不到 → 面板未展开 → 点 _expand_channel_btn，等待后重试
+│   │   └─ 匹配到   → 点条目中心 (x + w//2, y + h//2)
+│   ├─ 再截图确认面板已收起（该区域不再匹配到条目）
+│   └─ 重试 _max_retries 次仍失败 → False（调用方据此整体停机）
 │
 ├─ _capture_screenshot()
 │   ├─ try: adb.screenshot_validate()  ← 带质量验证

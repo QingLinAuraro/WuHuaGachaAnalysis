@@ -20,6 +20,14 @@ automation:
 # 默认由 src/config.py 的 database_path 给出绝对路径（<数据目录>/data/gacha.db）。
 gacha:
   scan_page_delay: 2.0
+  # 自动切换渠道（卡池）：扫完当前渠道后，展开记录页右上角的渠道面板，
+  # 切到下一个尚未扫描的渠道继续扫，直到全部渠道扫完。
+  # 关闭后只扫描进入记录页时所在的渠道。
+  auto_switch_channel: true
+  # 点击展开按钮后，等待渠道面板弹出动画完成的时间（秒）
+  channel_panel_delay: 1.0
+  # 单个渠道最多扫描多少页（防止异常时无限翻页）
+  max_pages_per_channel: 500
 gui:
   last_account_id: 1
   window_height: 600

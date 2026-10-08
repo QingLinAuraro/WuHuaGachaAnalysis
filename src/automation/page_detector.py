@@ -74,7 +74,9 @@ class PageDetector:
               details/
                 record.png / back.png
                 record/
-                  page_up.png / page_down.png / select.png / pool.png / back.png
+                  page_up.png / page_down.png / select.png / back.png
+                  xianshi.png / xianding.png / zhaoji.png / zhengji.png / saiji.png
+                                    # 渠道选择面板的条目（未选中态）
         """
         if not self._templates_dir.exists():
             logger.warning("模板目录不存在: {}", self._templates_dir)

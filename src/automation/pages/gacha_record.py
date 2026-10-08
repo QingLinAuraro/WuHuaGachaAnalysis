@@ -40,22 +40,21 @@ BTN_PAGE_DOWN = Button(
     name="PAGE_DOWN",
 )
 
-# 选择卡池
+# 展开渠道选择面板（记录页右上角的下拉箭头）
+# 这里用的是"紧贴框"：搜索区 (1185, 137, 46, 38) 与模板 select.png 尺寸完全相等，
+# matchTemplate 的结果矩阵退化成 1×1 —— 等于定点比对，没有任何位移容错。
+# 之所以敢这么用（实测数据）：
+#   · 该点得分 0.9940，远超阈值 0.8
+#   · 左/右/上/下平移后得分全部 ≤ 0.0059 → 唯一性极好，不会误匹配到别处
+#   · 不放大，才与下方渠道面板 (y 175~410) 完全不重叠（本框 y 137~175）
+# ⚠️ 以后若再换模板，必须保证"模板尺寸 ≤ 搜索区尺寸"，否则会因
+#    "搜索区比模板还小" 在 Button._appear_by_template 里直接返回 False。
 BTN_SELECT = Button(
-    area=(1182, 131, 49, 45),
-    button=(1182, 131, 49, 45),
+    area=(1185, 137, 46, 38),
+    button=(1185, 137, 46, 38),
     file=str(_ROOT / "assets" / "templates" / "gacha" / "details" / "record" / "select.png"),
     similarity=_THRESHOLD,
     name="SELECT",
-)
-
-# 切换卡池
-BTN_CHANGE_POOLS = Button(
-    area=(1051, 175, 177, 47),
-    button=(1051, 175, 177, 47),
-    file=str(_ROOT / "assets" / "templates" / "gacha" / "details" / "record" / "pool.png"),
-    similarity=_THRESHOLD,
-    name="CHANGE_POOLS",
 )
 
 # 返回

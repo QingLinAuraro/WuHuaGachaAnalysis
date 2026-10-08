@@ -32,6 +32,12 @@ from src.automation.ui_navigator import UINavigator, NavState
 from src.automation.page_detector import PageDetector, GamePage
 from src.automation.button import Button
 from src.automation.resolution import ResolutionAdapter
+from src.automation.pages.gacha_channel import (
+    channel_by_elimination,
+    find_visible_channels,
+    get_channel_button,
+)
+from src.automation.pages.gacha_record import BTN_SELECT as BTN_EXPAND_CHANNEL
 from src.automation.errors import (
     GameStuckError,
     NavigationError,
@@ -105,6 +111,16 @@ class GachaScanner:
             similarity=config.get("automation.image_recognition.template_threshold", 0.8),
             name="NEXT_PAGE",
         )
+
+        # 渠道切换（记录页右上角下拉箭头 → 展开渠道列表 → 选条目）
+        # 展开按钮复用 pages/gacha_record.py 的 BTN_SELECT
+        self._expand_channel_btn = BTN_EXPAND_CHANNEL
+        self._panel_delay: float = config.get("gacha.channel_panel_delay", 1.0)
+        self._max_pages: int = config.get("gacha.max_pages_per_channel", 500)
+        self._action_interval: float = config.get(
+            "automation.image_recognition.action_interval", 0.5
+        )
+
         # 状态
         self._records: list[GachaRecord] = []
         self._is_running: bool = False
@@ -226,65 +242,179 @@ class GachaScanner:
             self._is_running = False
             return []
 
-        # 2. 从第 1 页开始向后扫描（导航进入记录页后，游戏默认就停在第 1 页）
-        page = 1
-        stuck_count = 0
-        # 本批新记录：按扫描顺序（页 1→末页、页内从上到下 = 新→旧）暂存，
-        # 扫描结束后再统一编号并入库
+        # 2. 逐渠道扫描
+        #    每个渠道（卡池类型）对应一份独立的记录：
+        #      识别当前渠道 → 从第 1 页翻到末页 → 展开面板切到下一个未扫渠道 → 重复
+        #    直到所有渠道都扫过，或自动切换被关闭 / 切换失败。
+        #    进入记录页时默认停在第 1 页，切换渠道后同样回到第 1 页。
+        #
+        #    "一共要扫几个渠道"不写死：每次切换前把面板展开，按面板里实际显示的
+        #    条目数来算（见 pages/gacha_channel.find_visible_channels），
+        #    游戏以后加渠道类型也不会漏。
+        #
+        #    本批新记录按扫描顺序（渠道内：页 1→末页、页内从上到下 = 新→旧）暂存，
+        #    全部渠道扫完后统一编号并入库。
         new_records: list[GachaRecord] = []
+        auto_switch: bool = bool(config.get("gacha.auto_switch_channel", True))
+        scanned_channels: set = set()
+        overall_page = 0
+        current_channel: Optional[str] = None
+        panel_open = False      # 渠道面板当前是否被我们点开了（结束时需要收回去）
 
-        while self._is_running and page <= 500:
-            logger.info(">>> 第 {} 页 <<<", page)
-            self._notify_progress(page, 0, f"正在扫描第 {page} 页...")
-
-            img = self._capture_screenshot()
-            if img is None:
-                stuck_count += 1
-                if stuck_count >= 3:
-                    logger.error("连续截图失败，停止扫描")
-                    break
-                time.sleep(1)
-                continue
+        while self._is_running:
+            # ── 内层：扫完当前渠道的全部页 ──
+            page = 1
             stuck_count = 0
+            stop_all = False    # 需整体停止：截图连续失败 / 安全停机 / 用户中断
 
-            try:
-                page_records = self._scan_page(img)
-            except Exception as e:
-                logger.error("第 {} 页 OCR 异常: {}", page, e)
-                page_records = []
+            while self._is_running and page <= self._max_pages:
+                overall_page += 1
+                logger.info(">>> 第 {} 页（渠道 {}）<<<", page, current_channel or "识别中")
+                self._notify_progress(
+                    overall_page, 0,
+                    f"正在扫描「{current_channel or '当前渠道'}」第 {page} 页...",
+                )
 
-            page_banner = None
-            page_type = None
-            for record in page_records:
-                if page_banner is None and self._parser.banner_name and self._parser.banner_name != self._current_banner_name:
-                    page_banner = self._parser.banner_name
-                    page_type = self._parser.banner_type
-                    logger.info("OCR卡池: {} [{}]", page_banner, page_type)
-                record.banner_name = page_banner or self._current_banner_name
-                record.banner_type = page_type or self._current_banner_type
-                record.account_id = self._current_account_id
-                record.pull_date = record.pull_time.strftime("%m-%d")
-                new_records.append(record)
+                img = self._capture_screenshot()
+                if img is None:
+                    stuck_count += 1
+                    if stuck_count >= 3:
+                        logger.error("连续截图失败，停止扫描")
+                        stop_all = True
+                        break
+                    time.sleep(1)
+                    continue
+                stuck_count = 0
 
-            logger.info("第 {} 页: OCR {} 条 (账户ID={})",
-                        page, len(page_records), self._current_account_id)
+                try:
+                    page_records = self._scan_page(img)
+                except Exception as e:
+                    logger.error("第 {} 页 OCR 异常: {}", page, e)
+                    page_records = []
 
-            if not self._is_running:
-                logger.info("扫描已中断，本批已收集 {} 条", len(new_records))
+                # 第 1 页用来确定"当前看的是哪个渠道"。
+                # 切换成功后的渠道已有权威值（就是点进去的那个），这里再用 OCR 复核：
+                # 万一切换点错了条目，以页面实际内容为准 —— 否则会把"没扫过的渠道"
+                # 误记成已扫，导致永久漏扫。
+                if page == 1:
+                    detected = self._detect_channel(page_records)
+                    if detected != BannerType.UNKNOWN:
+                        if current_channel is not None and detected != current_channel:
+                            logger.warning("页面实际渠道为「{}」，与预期「{}」不符"
+                                           "（切换可能点错了），以页面为准",
+                                           detected, current_channel)
+                        else:
+                            logger.info("当前渠道: {}", detected)
+                        current_channel = detected
+                    else:
+                        logger.info("当前渠道: 本页 OCR 未识别出类型")
+
+                page_banner = None
+                page_type = None
+                for record in page_records:
+                    if page_banner is None and self._parser.banner_name and self._parser.banner_name != self._current_banner_name:
+                        page_banner = self._parser.banner_name
+                        page_type = self._parser.banner_type
+                        logger.info("OCR卡池: {} [{}]", page_banner, page_type)
+                    record.banner_name = page_banner or self._current_banner_name
+                    record.banner_type = page_type or self._current_banner_type
+                    record.account_id = self._current_account_id
+                    record.pull_date = record.pull_time.strftime("%m-%d")
+                    new_records.append(record)
+
+                logger.info("第 {} 页: OCR {} 条 (账户ID={})",
+                            page, len(page_records), self._current_account_id)
+
+                if not self._is_running:
+                    logger.info("扫描已中断，本批已收集 {} 条", len(new_records))
+                    stop_all = True
+                    break
+
+                if not self._next_page(img):
+                    if self._abort_reason:
+                        logger.error("安全停机: {} —— 已停止扫描（不做盲点击，避免误触抽卡）",
+                                     self._abort_reason)
+                        stop_all = True
+                    else:
+                        logger.info("「{}」内容未变化，本渠道已到最后一页",
+                                    current_channel or "当前渠道")
+                    break
+
+                page += 1
+                gc.collect()
+
+            if stop_all or not self._is_running:
                 break
 
-            if not self._next_page(img):
-                if self._abort_reason:
-                    logger.error("安全停机: {} —— 已停止扫描（不做盲点击，避免误触抽卡）",
-                                 self._abort_reason)
-                else:
-                    logger.info("内容未变化，已到最后一页")
+            # ── 本渠道扫完 ──
+            if current_channel and current_channel != BannerType.UNKNOWN:
+                scanned_channels.add(current_channel)
+            logger.info("「{}」扫描完成；已扫 {} 个渠道: {}",
+                        current_channel or "未知渠道",
+                        len(scanned_channels), sorted(scanned_channels))
+
+            if not auto_switch:
+                logger.info("自动切换渠道已关闭，结束扫描")
                 break
 
-            page += 1
+            # ── 展开面板：看这个账号实际有哪些渠道，再挑下一个没扫过的 ──
+            #    "要扫几个"完全以展开后显示的条目为准，不写死渠道种类数。
+            img = self._open_channel_panel()
+            if img is None:
+                logger.warning("渠道面板展开失败，停止自动切换（不做盲点击）")
+                break
+            panel_open = True
+
+            visible = find_visible_channels(img)
+            logger.info("面板中可切换的渠道: {}", visible or "（无）")
+
+            # 当前渠道还没认出来（OCR 失败）→ 排除法兜底：
+            # 面板里匹配不到模板的那个条目就是选中态，也就是当前正在看的渠道
+            if not current_channel or current_channel == BannerType.UNKNOWN:
+                current_channel = channel_by_elimination(visible)
+                if current_channel != BannerType.UNKNOWN:
+                    logger.info("当前渠道（排除法）: {}", current_channel)
+                    scanned_channels.add(current_channel)
+
+            if not current_channel or current_channel == BannerType.UNKNOWN:
+                logger.warning("渠道类型未能识别，停止自动切换（否则会反复扫同一个渠道）")
+                break
+
+            # 需要扫描的总数 = 面板里能匹配到的（未选中态）+ 当前选中这个
+            # （当前选中那条是浅色高亮底，匹配不上，得单独算进来）
+            total_channels = len(set(visible) | {current_channel})
+
+            if len(scanned_channels) >= total_channels:
+                logger.info("已扫描 {}/{} 个渠道，全部完成",
+                            len(scanned_channels), total_channels)
+                break
+
+            # 下一个没扫过的渠道：按界面自上而下的顺序取
+            target = next((t for t in visible if t not in scanned_channels), None)
+            if target is None:
+                logger.warning("面板中已无未扫描的渠道（已扫 {} 个 / 面板共 {} 个），结束",
+                               len(scanned_channels), total_channels)
+                break
+
+            logger.info("切换渠道: {} → {}（第 {}/{} 个）",
+                        current_channel, target, len(scanned_channels) + 1, total_channels)
+            if not self._switch_channel(target):
+                logger.error("切换到渠道「{}」失败，停止扫描（不做盲点击）", target)
+                break
+
+            # 切换成功 = 面板已被游戏自动收起
+            panel_open = False
+            current_channel = target
+            # 新渠道是独立的时间序列，跨页时间锚点必须重置
+            self._last_known_time = None
             gc.collect()
 
         self._is_running = False
+
+        # 最后一轮是为了"看还有没有没扫过的渠道"才展开面板的，扫完要收回去，
+        # 别让游戏停在面板展开的状态（否则可能影响下一次导航/截图）
+        if panel_open:
+            self._close_channel_panel()
 
         # 3. 存在性判断 + 分配 record_id + 入库
         #    new_records 是扫描顺序（页 1→末页、页内从上到下）= 全局"新→旧"
@@ -379,10 +509,13 @@ class GachaScanner:
         gc.collect()
 
         total = get_db().get_record_count(account_id=self._current_account_id)
-        logger.info("扫描完成: 本次读到 {} 条, 新增 {} 条, 已在库中 {} 条, 库内共 {} 条",
-                    len(new_records), new_count, dup_count, total)
+        logger.info("扫描完成: 本次读到 {} 条, 新增 {} 条, 已在库中 {} 条, 库内共 {} 条"
+                    "（共 {} 个渠道，{} 页）",
+                    len(new_records), new_count, dup_count, total,
+                    len(scanned_channels), overall_page)
 
-        self._notify_progress(page, page, f"扫描完成: 共{total}条, 新增{new_count}条")
+        self._notify_progress(overall_page, overall_page,
+                              f"扫描完成: 共{total}条, 新增{new_count}条")
 
         if self._on_complete:
             self._on_complete(self._records)
@@ -419,6 +552,152 @@ class GachaScanner:
             return
         n = get_db().set_pull_numbers(changed)
         logger.info("已按真实抽取顺序重编 pull_number（{} 条）", n)
+
+    # ── 渠道（卡池）切换 ──────────────────────────────
+
+    @staticmethod
+    def _detect_channel(records: list[GachaRecord]) -> str:
+        """从当前页记录推断"当前正在看哪个渠道"
+
+        记录页只显示当前选中渠道的记录，所以页内每条的 banner_type 相同，
+        取第一条有效值即可。
+
+        ⚠️ 不要改用面板模板反查当前渠道：面板里当前渠道处于选中态（浅色底 + 绿勾），
+           与未选中态模板差异较大，会失配（实测「限时渠道」选中时，它自己的模板
+           xianshi.png 反而在「限定渠道」那一行得 0.891）。识别当前渠道首选用 OCR，
+           OCR 认不出类型时再用排除法兜底（见 channel_by_elimination）。
+
+        Returns:
+            BannerType 常量；识别不出时返回 BannerType.UNKNOWN
+        """
+        for record in records:
+            banner_type = record.banner_type
+            if banner_type and banner_type != BannerType.UNKNOWN:
+                return banner_type
+        return BannerType.UNKNOWN
+
+    def _open_channel_panel(self) -> Optional[np.ndarray]:
+        """确保渠道面板处于展开状态，返回展开后的截图；失败返回 None
+
+        判定"已展开"的依据：面板区域里至少能匹配到一个【未选中态】渠道条目。
+        注意不能靠展开按钮判断 —— 面板展开前后那支箭头外观不变
+        （实测面板已展开时，select.png 依然得 0.9940，照样匹配得到）。
+
+        ⚠️ 账号只有一个渠道时，面板里只有当前选中那一条，一个模板也匹配不到，
+           这里会重试到上限并返回 None，上层据此停止自动切换。这是安全的
+           （最多多点两下展开按钮，不会点到别处），而且这种账号本来也没渠道可切。
+        """
+        for attempt in range(1, self._max_retries + 1):
+            if not self._is_running:
+                return None
+
+            img = self._capture_screenshot()
+            if img is None:
+                logger.warning("展开渠道面板: 截图失败（第 {} 次）", attempt)
+                time.sleep(1)
+                continue
+
+            if find_visible_channels(img):
+                return img
+
+            if not self._expand_channel_btn.appear(img):
+                logger.warning("展开渠道面板: 展开按钮不可见（第 {} 次）", attempt)
+                time.sleep(self._action_interval)
+                continue
+
+            pos = self._expand_channel_btn.coord()
+            logger.info("展开渠道面板 @ ({}, {}) score={:.2f}",
+                        pos[0], pos[1], self._expand_channel_btn._match_score)
+            self._adb.click(*self._res.to_real(*pos))
+            time.sleep(self._panel_delay)
+
+        logger.warning("展开渠道面板失败（已尝试 {} 次）：面板中未出现其他渠道条目",
+                       self._max_retries)
+        return None
+
+    def _close_channel_panel(self) -> None:
+        """收起渠道面板
+
+        展开按钮是个开关：面板已展开时再点一下就收起（外观不变，只能靠点击来切）。
+        只在"确认面板当前是展开的"之后调用。收不起来也不影响主流程，
+        所以不重试、不报错 —— 目的是别让游戏界面停在展开状态影响下一次扫描。
+        """
+        img = self._capture_screenshot()
+        if img is None or not self._expand_channel_btn.appear(img):
+            return
+        pos = self._expand_channel_btn.coord()
+        logger.info("收起渠道面板 @ ({}, {})", pos[0], pos[1])
+        self._adb.click(*self._res.to_real(*pos))
+        time.sleep(self._panel_delay)
+
+    def _switch_channel(self, target_type: str) -> bool:
+        """展开渠道面板并点击目标渠道条目
+
+        每轮流程：
+          截图 → 在面板区域匹配目标条目模板
+            · 匹配不到 → 说明面板未展开（或已收起）→ 点展开按钮，等待后重试
+            · 匹配到   → 点击条目中心 → 再截图确认面板已收起
+
+        为什么"匹配不到就展开"是安全的：待切换的目标渠道必然是**未选中态**
+        （当前选中的渠道刚扫完、已经记进已扫描集合），未选中条目与模板一致，
+        正常能匹配到；匹配不到就只可能是面板没展开。
+
+        点击坐标取模板匹配到的区域中心，不会去点固定坐标。
+
+        Args:
+            target_type: 目标渠道类型。调用方（scan_all）从面板可见条目里挑，
+                         一定是"没扫过 + 未选中态"，所以这里不会去点当前选中那条。
+
+        Returns:
+            True 表示点击已生效（面板收起）
+        """
+        btn = get_channel_button(target_type)
+        if btn is None:
+            logger.warning("渠道「{}」没有对应的面板模板，无法切换", target_type)
+            return False
+
+        for attempt in range(1, self._max_retries + 1):
+            if not self._is_running:
+                return False
+
+            img = self._capture_screenshot()
+            if img is None:
+                logger.warning("切换渠道: 截图失败（第 {} 次）", attempt)
+                time.sleep(1)
+                continue
+
+            match = btn.match(img)
+            if match is None:
+                # 面板未展开 → 点展开按钮
+                if not self._expand_channel_btn.appear(img):
+                    logger.warning("切换渠道: 展开按钮不可见（第 {} 次）", attempt)
+                    time.sleep(self._action_interval)
+                    continue
+                pos = self._expand_channel_btn.coord()
+                logger.info("展开渠道面板 @ ({}, {}) score={:.2f}",
+                            pos[0], pos[1], self._expand_channel_btn._match_score)
+                self._adb.click(*self._res.to_real(*pos))
+                time.sleep(self._panel_delay)
+                continue
+
+            # 面板已展开且定位到目标条目 → 点击
+            x, y, w, h, score = match
+            click_pos = (x + w // 2, y + h // 2)
+            logger.info("点击渠道「{}」@ ({}, {}) score={:.2f}",
+                        target_type, click_pos[0], click_pos[1], score)
+            self._adb.click(*self._res.to_real(*click_pos))
+            time.sleep(self._page_delay)
+
+            # 确认面板已收起：收起后该区域不再匹配到渠道条目
+            after = self._capture_screenshot()
+            if after is None or btn.match(after) is None:
+                logger.info("渠道「{}」切换生效，面板已收起", target_type)
+                return True
+            logger.warning("点击后目标条目仍可见，面板可能未收起（第 {} 次）", attempt)
+            time.sleep(self._action_interval)
+
+        logger.error("切换渠道「{}」失败（已尝试 {} 次）", target_type, self._max_retries)
+        return False
 
     # ── 单页扫描 ──────────────────────────────────────
 
