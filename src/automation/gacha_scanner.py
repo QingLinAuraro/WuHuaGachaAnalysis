@@ -52,6 +52,36 @@ from src.storage.database import get_db
 from src.config import config
 
 
+# ═══════════════════════════════════════════════════════════
+# 扫描模式
+# ═══════════════════════════════════════════════════════════
+
+class ScanMode(str):
+    """扫描模式常量（由用户选择）
+
+    FULL   —— 全部扫描：每个渠道从第 1 页一直翻到末页。
+              第一次扫描、或者上次扫到一半被中断了要补齐，用这个。
+              已经入过库的记录会被判重挡掉，只把没入库的补进去。
+
+    APPEND —— 追加扫描：每个渠道从第 1 页往下读，一旦【连续若干条】都能在
+              库里找到（说明已经翻进上次扫过的区域），本渠道立刻收工。
+              平时抽完卡只想补最新几条时用这个，比全部扫描快很多。
+              若一路翻到末页都没找到连续重合，说明这批全是新记录
+              （新账号、新渠道、或隔太久），照常全部入库。
+
+    两种模式最后的判重入库逻辑完全一样，区别只在"什么时候停止翻页"。
+    """
+    FULL = "full"
+    APPEND = "append"
+
+
+# 模式 → 中文名（日志与界面共用同一份文案）
+SCAN_MODE_LABELS = {
+    ScanMode.FULL: "全部扫描",
+    ScanMode.APPEND: "追加扫描",
+}
+
+
 def _compute_text_hash(ocr_results: list[dict]) -> str:
     """OCR 文本哈希（不含行号，跨扫描稳定）"""
     texts = "|".join(r["text"].strip() for r in ocr_results)
@@ -120,6 +150,8 @@ class GachaScanner:
         self._action_interval: float = config.get(
             "automation.image_recognition.action_interval", 0.5
         )
+        # 追加扫描：连续多少条能在库里找到，就认为"已翻进上次扫过的区域"
+        self._overlap_count: int = max(1, int(config.get("gacha.append_overlap_count", 10)))
 
         # 状态
         self._records: list[GachaRecord] = []
@@ -162,8 +194,13 @@ class GachaScanner:
         self._is_running = False
         logger.info("收到停止信号，当前页处理完后将停止")
 
-    def scan_all(self) -> list[GachaRecord]:
+    def scan_all(self, mode: str = ScanMode.FULL) -> list[GachaRecord]:
         """全量扫描（正序：第 1 页 → 末页）
+
+        Args:
+            mode: ScanMode.FULL（全部扫描，默认）或 ScanMode.APPEND（追加扫描）。
+                  区别只在"什么时候停止翻页"，两者的判重入库逻辑完全一致。
+                  传别的值按全部扫描处理。
 
         - 进入召集记录页时游戏默认停在第 1 页，用"下一页"逐页向后读取
         - 存在性判断：按 (内容键, 出现序号) 与库内记录对齐。
@@ -175,6 +212,11 @@ class GachaScanner:
           中断补齐更旧的记录后，按时间重编才能保证它们落在正确位置，
           而不是被追加到最新记录之后
         """
+        if mode not in SCAN_MODE_LABELS:
+            logger.warning("未知扫描模式 '{}'，按全部扫描处理", mode)
+            mode = ScanMode.FULL
+        append_mode = (mode == ScanMode.APPEND)
+
         self._records = []
         self._is_running = True
         self._abort_reason = ""
@@ -220,7 +262,8 @@ class GachaScanner:
                 db_keys.add((key, seq, r.character_name))
 
         logger.info("=" * 60)
-        logger.info("开始扫描 - 账户ID={} 卡池: {} (已有 {} 条)",
+        logger.info("开始{} - 账户ID={} 卡池: {} (已有 {} 条)",
+                    SCAN_MODE_LABELS[mode],
                     self._current_account_id,
                     self._current_banner_name or "(由OCR读取)",
                     len(existing_records))
@@ -266,6 +309,13 @@ class GachaScanner:
             page = 1
             stuck_count = 0
             stop_all = False    # 需整体停止：截图连续失败 / 安全停机 / 用户中断
+
+            # 追加扫描：本渠道的重合判定状态。每个渠道独立一套 ——
+            # 判定基准是"该渠道在库里已经有什么"，跨渠道共用会把别的渠道的记录
+            # 当成自己的重合，从而提前收工、漏掉新记录。
+            overlap_left: Optional[Counter] = None   # 签名 → 库里还剩几条没被认领
+            overlap_hits = 0                         # 当前已经连续命中几条
+            overlap_reached = False
 
             while self._is_running and page <= self._max_pages:
                 overall_page += 1
@@ -325,6 +375,39 @@ class GachaScanner:
                 logger.info("第 {} 页: OCR {} 条 (账户ID={})",
                             page, len(page_records), self._current_account_id)
 
+                # ── 追加扫描：连续重合到一定条数 → 判定已翻进上次扫过的区域 ──
+                #    放在 _next_page 之前：判定通过就直接结束本渠道，不再多点一次"下一页"。
+                #    ⚠️ 用"连续"而不是"累计"：累计只要凑够 N 条就停，万一有零散误匹配
+                #       （比如同一分钟在另一个渠道出过同名角色）就可能提前收工、漏掉新记录；
+                #       而"连中 N 条"要求中间一条新的都没有，误判概率极低。
+                #       代价只是 OCR 把某条已知记录的名字读错时会重新计数、多翻几页 ——
+                #       多翻几页只是慢一点，漏记录是不可逆的，所以宁可保守。
+                if append_mode and page_records:
+                    if overlap_left is None:
+                        overlap_left = self._overlap_signatures(
+                            existing_records, current_channel)
+                    for record in page_records:
+                        # 时间没识别出来的记录，内容键是 now() 兜底的、每次都不一样，
+                        # 拿它判重合没有意义 → 跳过（既不计数，也不打断连续）
+                        if record.pull_time.microsecond:
+                            continue
+                        sig = (make_record_key(record), record.character_name)
+                        if overlap_left[sig] > 0:
+                            # 库里那条被认领一次就少一条（同一分钟可能出同名角色多条）
+                            overlap_left[sig] -= 1
+                            overlap_hits += 1
+                            if overlap_hits >= self._overlap_count:
+                                overlap_reached = True
+                                break
+                        else:
+                            overlap_hits = 0     # 出现一条新的 → 连续中断，重新计数
+
+                if overlap_reached:
+                    logger.info("「{}」第 {} 页起连续 {} 条与库中记录重合 → "
+                                "已翻进上次扫过的区域，本渠道提前收工",
+                                current_channel or "当前渠道", page, overlap_hits)
+                    break
+
                 if not self._is_running:
                     logger.info("扫描已中断，本批已收集 {} 条", len(new_records))
                     stop_all = True
@@ -342,6 +425,12 @@ class GachaScanner:
 
                 page += 1
                 gc.collect()
+
+            # 追加扫描：一个渠道从头翻到尾都没凑出连续重合 → 这批全是新记录
+            # （新账号 / 这个渠道以前没扫过 / 隔太久库里的记录已经完全翻过去了）
+            if append_mode and not overlap_reached and not stop_all:
+                logger.info("「{}」翻到末页仍未找到连续 {} 条重合 → 视为全为新记录",
+                            current_channel or "当前渠道", self._overlap_count)
 
             if stop_all or not self._is_running:
                 break
@@ -509,13 +598,14 @@ class GachaScanner:
         gc.collect()
 
         total = get_db().get_record_count(account_id=self._current_account_id)
-        logger.info("扫描完成: 本次读到 {} 条, 新增 {} 条, 已在库中 {} 条, 库内共 {} 条"
+        logger.info("{}完成: 本次读到 {} 条, 新增 {} 条, 已在库中 {} 条, 库内共 {} 条"
                     "（共 {} 个渠道，{} 页）",
+                    SCAN_MODE_LABELS[mode],
                     len(new_records), new_count, dup_count, total,
                     len(scanned_channels), overall_page)
 
         self._notify_progress(overall_page, overall_page,
-                              f"扫描完成: 共{total}条, 新增{new_count}条")
+                              f"{SCAN_MODE_LABELS[mode]}完成: 共{total}条, 新增{new_count}条")
 
         if self._on_complete:
             self._on_complete(self._records)
@@ -552,6 +642,38 @@ class GachaScanner:
             return
         n = get_db().set_pull_numbers(changed)
         logger.info("已按真实抽取顺序重编 pull_number（{} 条）", n)
+
+    # ── 追加扫描：重合判定 ────────────────────────────
+
+    @staticmethod
+    def _overlap_signatures(
+        existing: list[GachaRecord], channel: Optional[str]
+    ) -> Counter:
+        """把库里已有记录整理成重合判定用的"签名多重集"：(内容键, 角色名) → 条数
+
+        为什么是多重集而不是集合：同一分钟能出几十条，同名角色也可能重复出现。
+        用计数就能做到"库里那条被认领一次就少一条"，多出来的同名记录仍然算新记录，
+        不会被一条库里的记录顶掉一片。
+
+        ⚠️ 为什么不用入库判重那套 (内容键, seq, 名称) 三元组：
+            seq 的定义是"距该组【最新那条】的偏移"，而组的总条数要整批扫完才算得出来，
+            扫描途中拿不到。这里只求"这条八成已经入过库"这个弱判断，
+            (内容键, 名称) 够用，而且判得更宽松 → 更不会把已知记录误判成新的、
+            从而一直往里翻。
+            真正的去重仍然由 scan_all 末尾的 (内容键, seq, 名称) 负责，
+            两处互不干扰：这里只决定"翻到哪一页停"，那里决定"哪条真正入库"。
+
+        渠道过滤：库里 banner_type 已知的记录只算同渠道；banner_type 是 UNKNOWN 的
+        （老库、或词库没覆盖到那个卡池）算给所有渠道 —— 宁可多给几条候选，
+        也不要因为类型字段缺失而永远判不出重合、每次都全量扫。
+        """
+        counts: Counter = Counter()
+        known_channel = bool(channel) and channel != BannerType.UNKNOWN
+        for record in existing:
+            if known_channel and record.banner_type not in (channel, BannerType.UNKNOWN):
+                continue
+            counts[(make_record_key(record), record.character_name)] += 1
+        return counts
 
     # ── 渠道（卡池）切换 ──────────────────────────────
 

@@ -18,7 +18,7 @@ from PyQt6.QtGui import QFont
 from src.config import config
 from src.storage.database import get_db
 from src.emulator.adb_client import ADBClient
-from src.automation.gacha_scanner import GachaScanner
+from src.automation.gacha_scanner import GachaScanner, ScanMode, SCAN_MODE_LABELS
 from src.gui.pages.home_page import HomePage
 from src.gui.pages.settings_page import SettingsPage
 
@@ -269,6 +269,13 @@ QTabBar::tab:hover { color: #d4d4d4; }
     color: white;
     border-left: 3px solid #007acc;
 }
+
+/* 侧边栏窄（140px），清掉 QComboBox 默认的 min-width，否则会被撑破 */
+#scanModeCombo {
+    min-width: 0px;
+    padding: 2px 6px;
+    font-size: 12px;
+}
 """
 
 
@@ -501,6 +508,18 @@ class MainWindow(QMainWindow):
         self._load_accounts()
         self.refresh_all_pages()
 
+    def _on_scan_mode_changed(self, idx: int) -> None:
+        """记住用户选的扫描模式，下次启动沿用"""
+        if idx < 0:
+            return
+        mode = self._mode_combo.currentData()
+        config.set("gui.scan_mode", mode)
+        self.log_msg(f"[INFO] 扫描模式: {SCAN_MODE_LABELS.get(mode, mode)}")
+
+    def current_scan_mode(self) -> str:
+        """当前选中的扫描模式"""
+        return self._mode_combo.currentData() or ScanMode.FULL
+
     # ── UI 构建 ──────────────────────────────────────
 
     def _setup_ui(self) -> None:
@@ -573,6 +592,29 @@ class MainWindow(QMainWindow):
 
         sl.addStretch()
 
+        # 扫描模式选择：放在"开始扫描"正上方，选完点按钮即可
+        self._mode_combo = QComboBox()
+        self._mode_combo.setObjectName("scanModeCombo")
+        self._mode_combo.addItem(SCAN_MODE_LABELS[ScanMode.FULL], ScanMode.FULL)
+        self._mode_combo.addItem(SCAN_MODE_LABELS[ScanMode.APPEND], ScanMode.APPEND)
+        self._mode_combo.setFixedHeight(26)
+        self._mode_combo.setToolTip(
+            "全部扫描：每个渠道从第 1 页翻到末页。\n"
+            "  第一次扫描、或上次扫到一半中断了要补齐，用这个。\n"
+            "  已入过库的记录会被判重挡掉，只补没入库的。\n"
+            "\n"
+            "追加扫描：每个渠道往下读，连续找到若干条库里已有的记录就停。\n"
+            "  平时抽完卡只想补最新几条，用这个，快很多。\n"
+            "  若翻到末页都没找到重合，说明全是新记录，会全部入库。"
+        )
+        # 恢复上次用过的模式（记住用户习惯，不用每次都选）
+        last_mode = config.get("gui.scan_mode", ScanMode.FULL)
+        idx = self._mode_combo.findData(last_mode)
+        if idx >= 0:
+            self._mode_combo.setCurrentIndex(idx)
+        self._mode_combo.currentIndexChanged.connect(self._on_scan_mode_changed)
+        sl.addWidget(self._mode_combo)
+
         self._scan_btn = QPushButton("开始扫描")
         self._scan_btn.setObjectName("scanButton")
         self._scan_btn.setProperty("danger", True)
@@ -630,6 +672,9 @@ class MainWindow(QMainWindow):
     def set_scan_enabled(self, enabled: bool) -> None:
         """切换扫描按钮状态：True=可开始扫描, False=扫描中可停止"""
         self._scan_btn.setEnabled(True)  # 始终可点击
+        # 扫描期间锁住模式选择：模式是"点开始那一刻"定下来的，
+        # 中途能改会让人以为改动生效了，实际没有
+        self._mode_combo.setEnabled(enabled)
         if enabled:
             self._scan_btn.setText("开始扫描")
             self._scan_btn.setProperty("danger", True)
@@ -670,9 +715,13 @@ class MainWindow(QMainWindow):
             self.set_status("请先连接模拟器")
             return
 
+        # 模式在点"开始扫描"这一刻定下来，之后中途改下拉框不影响本次
+        mode = self.current_scan_mode()
+        mode_label = SCAN_MODE_LABELS.get(mode, mode)
+
         self.set_scan_enabled(False)
-        self.set_status("正在扫描...")
-        self.log_msg("[INFO] 开始扫描召集记录...")
+        self.set_status(f"正在{mode_label}...")
+        self.log_msg(f"[INFO] 开始{mode_label}召集记录...")
 
         from src.automation.gacha_scanner import create_scanner
         from src.models.gacha_record import BannerType
@@ -688,7 +737,7 @@ class MainWindow(QMainWindow):
 
         def _run():
             try:
-                records = self._scanner.scan_all()
+                records = self._scanner.scan_all(mode)
                 sig.scan_done.emit(len(records))
             except Exception as e:
                 sig.scan_error.emit(str(e))

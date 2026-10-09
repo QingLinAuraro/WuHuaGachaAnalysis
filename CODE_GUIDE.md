@@ -136,11 +136,16 @@ automation:
   # database.path 不写在这里：写相对路径会按启动时的 CWD 解析，换个启动方式就换了库。
   # 默认由 config.database_path 给出绝对路径 <数据目录>/data/gacha.db
   gacha:
-    scan_page_delay: 2.0     # 每页扫描延迟
+    scan_page_delay: 2.0            # 每页扫描延迟
+    auto_switch_channel: true       # 扫完一个渠道自动切下一个
+    channel_panel_delay: 1.0        # 渠道面板弹出等待
+    max_pages_per_channel: 500      # 单渠道翻页上限（防异常时无限翻页）
+    append_overlap_count: 10        # 追加扫描："连续多少条在库里找到"即判定已进入旧区域
   gui:
     window_width: 900        # 窗口默认大小
     window_height: 600
     last_account_id: 1
+    scan_mode: full          # 上次选的扫描模式（full=全部扫描 / append=追加扫描）
 ```
 
 ### 2.3 `config/names.yaml` — 词库（238行）
@@ -254,8 +259,11 @@ MainWindow._setup_ui (L506) — 119行的 UI 构建
 │   ├─ L553   侧边导航栏 (固定宽度 140px)
 │   │   ├─ L558   ["概览", "设置"] 导航按钮
 │   │   ├─ L563   每个按钮 36px 高
-│   │   ├─ L571   右侧弹簧
-│   │   └─ L574   开始扫描按钮 (38px 高)
+│   │   ├─ L593   右侧弹簧 (addStretch)
+│   │   ├─ L596   扫描模式下拉框 QComboBox (objectName="scanModeCombo", 26px 高)
+│   │   │        ├─ 两项: "全部扫描"(data=full) / "追加扫描"(data=append)
+│   │   │        └─ 恢复上次选择 config.get("gui.scan_mode")，切换即写回
+│   │   └─ L618   开始扫描按钮 (38px 高)
 │   └─ L585   内容区 QStackedWidget
 │       ├─ L588   HomePage(account_id=0)  ← 首页
 │       └─ L589   SettingsPage()           ← 设置页
@@ -275,19 +283,21 @@ MainWindow._connect_signals (L403)
 
 | 方法 | 行 | 功能 | 调用链 |
 |------|-----|------|--------|
-| `_on_log` | L409 | 追加日志行 + 每50条触发清理 | → `_trim_old_logs()` (L419) |
-| `_trim_old_logs` | L419 | 移除 >10分钟的旧日志 | QTextDocument 逐 block 遍历解析时间戳 |
-| `_on_scan_done` | L449 | 扫描完成：刷新所有页面，恢复按钮 | → `refresh_all_pages()`、`set_scan_enabled(True)` |
-| `_on_scan_error` | L456 | 扫描失败：记录错误，恢复按钮 | → `set_scan_enabled(True)` |
-| `_load_accounts` | L467 | 从 DB 加载账户到下拉框 | → `get_db().list_accounts()` |
-| `_on_account_changed` | L490 | 切换账户：保存到 config，刷新页面 | → `config.set()`、`refresh_all_pages()` |
-| `_on_manage_accounts` | L498 | 弹出账户对话框 | → `AccountDialog(...)` → `_load_accounts()` |
-| **`_on_scan`** | L660 | 启动/停止扫描 ⭐ | 见下方详细流程 |
-| `_on_adb_ready` | L655 | ADB 就绪回调（来自 SettingsPage） | 更新 `self._adb`，通知状态 |
-| `refresh_all_pages` | L706 | 刷新所有页面 | → `page.refresh()` |
-| `launch_gui` | L711 | 模块级函数，应用入口 | `QApplication` → `MainWindow()` → `exec()` |
+| `_on_log` | L416 | 追加日志行 + 每50条触发清理 | → `_trim_old_logs()` (L426) |
+| `_trim_old_logs` | L426 | 移除 >10分钟的旧日志 | QTextDocument 逐 block 遍历解析时间戳 |
+| `_on_scan_done` | L456 | 扫描完成：刷新所有页面，恢复按钮 | → `refresh_all_pages()`、`set_scan_enabled(True)` |
+| `_on_scan_error` | L463 | 扫描失败：记录错误，恢复按钮 | → `set_scan_enabled(True)` |
+| `_load_accounts` | L474 | 从 DB 加载账户到下拉框 | → `get_db().list_accounts()` |
+| `_on_account_changed` | L497 | 切换账户：保存到 config，刷新页面 | → `config.set()`、`refresh_all_pages()` |
+| `_on_manage_accounts` | L505 | 弹出账户对话框 | → `AccountDialog(...)` → `_load_accounts()` |
+| `_on_scan_mode_changed` | L511 | 记住用户选的扫描模式 | → `config.set("gui.scan_mode", mode)` |
+| `current_scan_mode` | L519 | 读当前选中的扫描模式 | → `self._mode_combo.currentData()`，空则 `full` |
+| `set_scan_enabled` | L672 | 扫描期间锁按钮 + 下拉框 | 按钮文案切"开始/停止扫描"；`_mode_combo.setEnabled()` |
+| **`_on_scan`** | L705 | 启动/停止扫描 ⭐ | 见下方详细流程 |
+| `_on_adb_ready` | L700 | ADB 就绪回调（来自 SettingsPage） | 更新 `self._adb`，通知状态 |
+| `refresh_all_pages` | L755 | 刷新所有页面 | → `page.refresh()` |
 
-#### `_on_scan` — 启动/停止扫描 (L660-696)
+#### `_on_scan` — 启动/停止扫描 (L705-745)
 
 ```
 _on_scan()
@@ -298,6 +308,12 @@ _on_scan()
 ├─ if self._adb is None:
 │   ├─ log_msg("未连接")
 │   └─ return
+│
+├─ mode = self.current_scan_mode()   # ⭐ 模式在"点开始"这一刻定下来
+│   └─ 之后中途改下拉框不影响本次（set_scan_enabled 期间下拉框是禁用的）
+│
+├─ set_scan_enabled(False)   # 按钮变"停止扫描"；下拉框同时禁用
+├─ set_status(f"正在{mode_label}...")
 │
 ├─ scanner = create_scanner(self._adb)  → gacha_scanner.py:463
 │   └─ return GachaScanner(adb, Screenshot(adb), PageDetector())
@@ -315,10 +331,12 @@ _on_scan()
 ├─ scanner.on_progress = lambda msg: self._signals.log_msg.emit(...)
 ├─ scanner.on_record_found = lambda msg: self._signals.log_msg.emit(...)
 ├─ self._scanner = scanner
-├─ set_scan_enabled(False)  # 按钮变为"停止扫描"
 │
-└─ threading.Thread(target=scanner.scan_all, daemon=True).start()
-    └─ → gacha_scanner.py:153  scan_all()
+└─ def _run():
+   ├─ records = self._scanner.scan_all(mode)   # ⭐ 把 mode 交给扫描器
+   └─ sig.scan_done.emit(len(records))
+   → threading.Thread(target=_run, daemon=True).start()
+     └─ → gacha_scanner.py  scan_all(mode)
 ```
 
 ### 3.3 `home_page.py` — 首页概览
@@ -1098,14 +1116,17 @@ GachaScanner
 │
 ├─ stop()                     L148  → self._is_running = False
 │
-├─ ⭐ scan_all()              L153  核心扫描流程
+├─ ⭐ scan_all(mode)          L165  核心扫描流程
+│   │   mode = ScanMode.FULL（全部扫描，默认）/ ScanMode.APPEND（追加扫描）
+│   │   两个模式只有"什么时候停止翻页"不同，判重入库部分完全共用。
+│   │   传了别的值 → 打警告并按 FULL 跑（不抛异常，避免界面上选错就把扫描卡死）
 │   │
 │   ├─ 初始化阶段
-│   │   ├─ L159  stop() → 重置状态
+│   │   ├─ stop() → 重置状态
 │   │   ├─ screenshot.reset_counter()
 │   │   ├─ adb.reset_click_history()
-│   │   └─ 加载已有记录，构建"内容键 → 已有个数"计数表 (db_counts)
-│   │       └─ get_db().get_all_records(account_id) → Counter(make_record_key(r))
+│   │   └─ 加载已有记录，构建"已入库三元组"集合 db_keys
+│   │       └─ get_db().get_all_records(account_id) → {(内容键, seq, 名称)}
 │   │
 │   ├─ 导航阶段
 │   │   └─ navigator.go_to_gacha_records() → ui_navigator（识别不出页面就放弃，不盲点）
@@ -1124,6 +1145,18 @@ GachaScanner
 │   │   │   │   万一点错了条目，以页面实际内容为准（否则会把没扫过的渠道记成已扫）
 │   │   │   │
 │   │   │   ├─ 逐条补齐 banner_name / banner_type / account_id，暂存到 new_records
+│   │   │   │
+│   │   │   ├─ ⭐【仅追加扫描】连续重合判定
+│   │   │   │   ├─ 首次进入本渠道时构建 overlap_left = _overlap_signatures(库里记录, 本渠道)
+│   │   │   │   │   签名 = (内容键, 角色名) 的多重集；库里已知渠道的记录只算同渠道，
+│   │   │   │   │   banner_type=UNKNOWN 的算给所有渠道（宁可多给候选）
+│   │   │   │   ├─ 逐条：签名还有余量 → 余量-1、overlap_hits+1；否则 overlap_hits 归零
+│   │   │   │   │   （时间未识别出的记录跳过：内容键是 now() 兜底的，判不了重合）
+│   │   │   │   └─ overlap_hits >= append_overlap_count → 直接 break（本渠道收工）
+│   │   │   │       ⚠️ 放在 _next_page 之前：省掉一次多余的"下一页"点击
+│   │   │   │       ⚠️ 必须用"连续"而不是"累计"：累计只要凑够 N 条就停，
+│   │   │   │          万一有零散误匹配就可能提前收工、漏掉新记录；
+│   │   │   │          "连中 N 条"要求中间一条新的都没有，误判概率极低
 │   │   │   │
 │   │   │   ├─ _next_page(img) → 点"下一页" + 像素差分判断是否真翻页
 │   │   │   │   ├─ 匹配不到"下一页"按钮：
@@ -1236,12 +1269,28 @@ GachaScanner
 │       ⚠️ 只能靠"面板里出现了渠道条目"判断展开，不能靠展开箭头 ——
 │          实测面板开/关时 select.png 都是 0.9940，箭头外观完全一样
 │
+├─ ⭐ _close_channel_panel()           收起渠道面板
+│   ├─ 展开按钮是开关：面板展开时再点一下即收起（外观不变，只能靠点击切）
+│   ├─ 只在"确认面板当前是展开的"之后调用（scan_all 用 panel_open 标记控制）
+│   └─ 收不起来也不影响主流程 → 不重试、不报错
+│
 ├─ ⭐ _switch_channel(target)   L609  展开渠道面板并点击目标条目
 │   ├─ 截图 → get_channel_button(target).match(img)
 │   │   ├─ 匹配不到 → 面板未展开 → 点 _expand_channel_btn，等待后重试
 │   │   └─ 匹配到   → 点条目中心 (x + w//2, y + h//2)
 │   ├─ 再截图确认面板已收起（该区域不再匹配到条目）
 │   └─ 重试 _max_retries 次仍失败 → False（调用方据此整体停机）
+│
+├─ ⭐ _overlap_signatures(existing, channel)   只看"翻到哪一页停"的重合判定表
+│   ├─ 返回 Counter：{(内容键, 角色名): 条数}
+│   ├─ 用多重集而不是集合：同一分钟能出几十条、同名角色也会重复，
+│   │   用计数才能"库里那条被认领一次就少一条"，多出来的同名记录仍算新记录
+│   ├─ 渠道过滤：库里 banner_type 已知的只算同渠道；UNKNOWN 的算给所有渠道
+│   │   （宁可多给几条候选，也不要因类型字段缺失而永远判不出重合、每次全量扫）
+│   └─ ⚠️ 不用入库判重那套 (内容键, seq, 名称)：seq 要整批扫完才算得出来，
+│       扫描途中拿不到。这里只求"这条八成入过库"这个弱判断，够用且更宽松。
+│       真正的去重仍由 scan_all 末尾的三元组负责，两处互不干扰：
+│       这里决定"翻到哪一页停"，那里决定"哪条真正入库"
 │
 ├─ _capture_screenshot()
 │   ├─ try: adb.screenshot_validate()  ← 带质量验证
@@ -1260,6 +1309,36 @@ GachaScanner
 └─ _notify_progress(msg)
     └─ if on_progress: on_progress(msg)
 ```
+
+**扫描模式（ScanMode）**
+
+用户在侧边栏「扫描模式」下拉框里选，选择会写进 `gui.scan_mode` 下次沿用；
+点「开始扫描」的那一刻读取一次，扫描途中下拉框被禁用（改了也不生效，索性锁住）。
+
+| | 全部扫描 `full` | 追加扫描 `append` |
+| --- | --- | --- |
+| 停止条件 | 每个渠道翻到末页 | 连续 `append_overlap_count` 条命中库中已有记录 |
+| 适用场景 | 第一次扫描、上次扫到一半中断了要补齐 | 平时抽完卡只补最新几条 |
+| 是否遍历所有渠道 | 是 | 是（每个渠道各自判定、各自提前停） |
+| 判重入库 | **完全一致** | **完全一致** |
+
+几个必须记住的点：
+
+1. **两种模式只是"什么时候停止翻页"不同**，最后的判重入库共用同一段代码。
+   所以追加扫描不会写出与全部扫描不同的结果，只是更快。
+2. **用"连续重合"而不是"累计重合"**：累计只要凑够 N 条就停，万一有零散误匹配
+   （比如同一分钟在别的渠道出过同名角色）就可能提前收工、**漏掉新记录**；
+   "连中 N 条"要求中间一条新的都没有，误判概率极低。
+   代价只是 OCR 把某条已知记录的名字读错时会重新计数、多翻几页 ——
+   多翻几页只是慢一点，漏记录是不可逆的，所以宁可保守。
+3. **重合判定表按渠道分开建**（`_overlap_signatures` 用 `banner_type` 过滤），
+   不能跨渠道共用：否则别的渠道的记录会被当成自己的重合，同样会提前收工。
+4. **重合判定的签名是 `(内容键, 角色名)`，与入库判重的 `(内容键, seq, 名称)` 不是一套**。
+   `seq` 要整批扫完才算得出来，扫描途中拿不到。两处职责不同、互不干扰：
+   前者决定"翻到哪一页停"，后者决定"哪条真正入库"。
+5. **一个渠道从头翻到尾都没凑出连续重合** → 说明这批全是新记录
+   （新账号 / 该渠道以前没扫过 / 隔太久库里的记录已经翻过去了），照常全部入库。
+   这正是需求里说的"全扫描完没有重复情况，可以认为是新的记录，追加上去"。
 
 **关键设计点**：
 1. **去重**：record_id = `md5(内容键 + 出现序号 + 角色名)`，

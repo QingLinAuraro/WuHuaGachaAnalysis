@@ -28,6 +28,11 @@ gacha:
   channel_panel_delay: 1.0
   # 单个渠道最多扫描多少页（防止异常时无限翻页）
   max_pages_per_channel: 500
+  # 「追加扫描」模式：一个渠道里连续有多少条能在库中已有记录里找到，
+  # 就认为已经翻进"上次扫过的区域"，本渠道提前收工。
+  #   调大 = 更保守（多翻几页，几乎不可能漏记录）
+  #   调小 = 更快，但万一连续误匹配上，有可能提前停下、漏掉新记录
+  append_overlap_count: 10
 gui:
   last_account_id: 1
   window_height: 600

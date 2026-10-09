@@ -11,7 +11,9 @@ from src.automation.page_detector import (
     PageDetector, GamePage, color_match_rarity,
 )
 from src.automation.ui_navigator import UINavigator, NavState
-from src.automation.gacha_scanner import GachaScanner, create_scanner
+from src.automation.gacha_scanner import (
+    GachaScanner, create_scanner, ScanMode, SCAN_MODE_LABELS,
+)
 
 __all__ = [
     "Button", "ButtonGrid",
@@ -19,5 +21,5 @@ __all__ = [
     "Page", "PageGraph", "build_wuhua_pages", "get_page", "get_page_names",
     "PageDetector", "GamePage", "color_match_rarity",
     "UINavigator", "NavState",
-    "GachaScanner", "create_scanner",
+    "GachaScanner", "create_scanner", "ScanMode", "SCAN_MODE_LABELS",
 ]
